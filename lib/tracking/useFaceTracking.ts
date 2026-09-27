@@ -225,12 +225,15 @@ export function useFaceTracking(
         frame.framesWithFace = 0;
         if (lostFrames > 6) {
           // Was tracked → brief LOST state, then back to searching.
+          // COMPLETE (profile screen) and ERROR persist regardless.
           const wasTracking =
             frame.state === "tracking" ||
             frame.state === "locked" ||
             frame.state === "occluded" ||
             frame.state === "deep_scan";
-          if (frame.state !== "searching" && frame.state !== "lost") {
+          if (frame.state === "complete" || frame.state === "error") {
+            // leave the profile / error state untouched
+          } else if (frame.state !== "searching" && frame.state !== "lost") {
             setState(wasTracking ? "lost" : "searching", performance.now());
           }
           if (frame.state === "lost" && frame.stateAge > 1.2) {
@@ -293,7 +296,7 @@ export function useFaceTracking(
       const pose: HeadPose | null =
         mat && mat.length >= 12 ? poseFromMatrix(mat) : poseFromLandmarks(raw);
       frame.pose = pose;
-      frame.gaze = estimateGaze(smoothed);
+      frame.gaze = estimateGaze(smoothed, frame.mirrored);
       frame.dynamics = measureDynamics(
         smoothed,
         extractBlendshapes(result, best),
@@ -316,6 +319,7 @@ export function useFaceTracking(
       switch (frame.state) {
         case "searching":
         case "lost":
+          frame.initProgress = 0;
           setState("detected", now);
           break;
         case "detected":

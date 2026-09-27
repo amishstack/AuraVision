@@ -54,7 +54,10 @@ function label(dx: number, dy: number, conf: number): GazeLabel {
   return horiz === "" ? "CENTER" : (horiz as GazeLabel);
 }
 
-export function estimateGaze(lm: Landmark[] | null): GazeEstimate | null {
+export function estimateGaze(
+  lm: Landmark[] | null,
+  mirrored = false,
+): GazeEstimate | null {
   if (!lm) return null;
   const l = eyeGaze(lm, L_IRIS, L_INNER, L_OUTER, L_TOP, L_BOT);
   const r = eyeGaze(lm, R_IRIS, R_INNER, R_OUTER, R_TOP, R_BOT);
@@ -68,8 +71,11 @@ export function estimateGaze(lm: Landmark[] | null): GazeEstimate | null {
     return { dx: 0, dy: 0, confidence: 0, label: "LOW CONFIDENCE" };
   }
 
-  const dx = ((l?.dx ?? 0) * lw + (r?.dx ?? 0) * rw) / total;
+  let dx = ((l?.dx ?? 0) * lw + (r?.dx ?? 0) * rw) / total;
   const dy = ((l?.dy ?? 0) * lw + (r?.dy ?? 0) * rw) / total;
+  // Mirrored preview: reported LEFT/RIGHT should match what the viewer
+  // sees on screen, which is flipped relative to image coordinates.
+  if (mirrored) dx = -dx;
   const confidence = clamp01(total / 2);
   return { dx, dy, confidence, label: label(dx, dy, confidence) };
 }

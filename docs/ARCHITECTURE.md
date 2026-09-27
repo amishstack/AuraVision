@@ -1,128 +1,157 @@
-# AuraVision V1 — Architecture
+# AuraVision — Architecture
 
 ## Pipeline
 
 ```
 getUserMedia stream
-  └─► <video> element (display + inference share one element — no copies)
-        └─► FaceLandmarker.detectForVideo()  [per new video frame]
-              ├─► face landmarks (478 pts, normalized xyz)
-              ├─► facial transformation matrix (4×4)  → head pose
-              └─► face blendshapes (52 scores)        → expression signals
-                    └─► most-prominent-face selection (largest bbox)
-                          └─► LandmarkSmoother (One Euro filter per landmark)
-                                └─► TrackingFrame (mutable store, no React)
-                                      ├─► FaceMeshOverlay (canvas, own rAF)
-                                      └─► StatusPanel/DebugPanel (10 Hz poll)
+  └─► <video> (display + inference share one element — no copies)
+        └─► InferenceScheduler — decides when detectForVideo runs
+              └─► FaceLandmarker.detectForVideo()  [scheduled]
+                    ├─► 478 landmarks (normalized xyz)
+                    ├─► facial transformation matrix → head pose
+                    └─► 52 blendshapes             → dynamics signals
+                          └─► most-prominent-face selection
+                                ├─► LandmarkSmoother (One Euro, at rAF rate)
+                                ├─► estimateGaze()         lib/gaze
+                                ├─► measureDynamics()      lib/dynamics
+                                ├─► computeDepthField()    lib/depth
+                                ├─► LightingAnalyzer       lib/lighting
+                                ├─► occlusion heuristic    (edge + presence)
+                                └─► DeepScanCollector      lib/scan (opt-in)
+                                      └─► TrackingFrame (mutable store)
+                                            ├─► FaceMeshOverlay (canvas, rAF)
+                                            └─► Layer C UI (10 Hz telemetry)
 ```
 
 ## Repository layout
 
 ```
-app/                    Next.js entry (layout, page, globals)
+app/                      Next.js entry
 components/
-  AuraVisionApp.tsx     orchestrator — owns videoRef, session retry, debug flag
-  camera/CameraFeed.tsx the <video> element (mirrored via CSS)
-  face/FaceMeshOverlay.tsx  canvas renderer, reads frame ref each rAF
-  ui/StatusPanel.tsx    state label + telemetry (10 Hz snapshot)
-  ui/DebugPanel.tsx     diagnostics readout
+  AuraVisionApp.tsx       orchestrator — session retry, debug, facing, scan
+  camera/CameraFeed.tsx   <video> (mirrored via CSS for front cam)
+  face/FaceMeshOverlay.tsx  Layer B renderer — hierarchical geometry
+  scan/VisualProfile.tsx  Deep Scan result screen
+  ui/SystemInterface.tsx  Layer C — status + pose/gaze/track modules
+  ui/DebugPanel.tsx       diagnostics (separate from public UI)
 lib/
-  vision/camera.ts          getUserMedia, error mapping, stream release
-  vision/faceLandmarker.ts  WASM/model loading, GPU→CPU fallback
-  tracking/useFaceTracking.ts   the real-time loop (per-frame pipeline)
-  tracking/useTelemetry.ts      low-rate React bridge to the frame store
-  geometry/mesh.ts            MediaPipe connection tiers, bbox, face area
-  geometry/pose.ts            matrix → yaw/pitch/roll + landmark fallback
-  smoothing/oneEuro.ts        1€ filter implementation
+  vision/camera.ts        getUserMedia, error mapping, facingMode
+  vision/faceLandmarker.ts WASM/model loading, GPU→CPU fallback
+  tracking/useFaceTracking.ts   the real-time loop + state machine
+  tracking/useTelemetry.ts      10 Hz React bridge to the frame store
+  smoothing/oneEuro.ts          1€ filter
   smoothing/landmarkSmoother.ts per-landmark filter bank
-types/vision.ts           shared types, TrackingFrame store shape
-public/mediapipe/         vendored WASM runtime + face_landmarker.task
-docs/ARCHITECTURE.md      this file
+  geometry/mesh.ts              MediaPipe connection tiers, bbox, area
+  geometry/pose.ts              matrix → yaw/pitch/roll + fallback
+  gaze/gaze.ts                  iris-displacement gaze estimate
+  dynamics/dynamics.ts          apertures, spreads, motion energy
+  depth/depth.ts                relative depth field from landmark z
+  lighting/lighting.ts          luminance / contrast / direction
+  performance/scheduler.ts      adaptive inference scheduling
+  scan/deepScan.ts              temporal sampling → VisualProfile
+types/vision.ts           shared types incl. TrackingFrame
+public/mediapipe/         vendored WASM + face_landmarker.task
+docs/
 ```
 
-## Key decisions
+## Pretrained vs. custom — the important distinction
 
-### Canvas 2D overlay instead of Three.js / R3F
+**Pretrained components** (MediaPipe / Google):
+- `face_landmarker.task` — the landmark detection model itself
+- WASM runtime (`tasks-vision`) — inference engine
+- Blendshape + transformation-matrix outputs of that model
 
-Landmarks arrive in normalized 2D image coordinates; projecting them is
-free. The heaviest production frame draws ~800 line segments — trivially
-60fps on canvas 2D, including on Intel Iris Xe. Three.js would add a
-scene graph, draw-call overhead, and a second render loop for zero visual
-gain at this density. If V2 wants a true 3D shaded surface or point-cloud
-depth effects, R3F becomes justified — the seam is `FaceMeshOverlay`,
-which is the only file that knows how pixels get drawn.
+**AuraVision custom logic** (this repository):
+- Temporal smoothing architecture (per-landmark One Euro bank)
+- Inference scheduling (adaptive rate decoupled from render)
+- Gaze estimation from iris displacement + aperture confidence
+- Facial dynamics metrics (apertures, spreads, motion energy)
+- Relative depth field normalization + depth-modulated rendering
+- Illumination-field heuristic
+- Occlusion/degradation heuristics
+- The full state machine and cinematic initialization sequence
+- Deep Scan collector + Visual Profile distillation
+- All visualization, UI, and design
 
-### One Euro filtering (lib/smoothing)
+## State machine
 
-Raw landmark jitter is ~±2px at rest — unacceptable for a cinematic mesh.
-A naive EMA removes jitter but lags during head turns. One Euro solves
-this: cutoff frequency rises with velocity, so stillness is heavily
-smoothed and fast motion stays tight. Tunables live in
-`LandmarkSmoother(1.2, 0.6)` — (minCutoff Hz, beta).
+```
+boot → searching → detected ─(0.45s)─► initializing ─(1.9s)─► tracking
+                                            initProgress stages geometry
+                                     tracking ⇄ locked  (stability gate)
+                                     tracking/locked ⇄ occluded
+                                     any-face-state → lost → searching
+                                     tracking/locked → deep_scan → complete
+```
 
-On face re-acquisition the filters reset and the first 2 frames snap
-directly to raw values — prevents a visible "sweep in from old position".
+`frame.stateAge` + `frame.initProgress` drive the staged emergence —
+nodes → oval → features → scaffold → brackets (smoothstep ramps in the
+renderer, no timers in React).
 
-### Pose from the transformation matrix
+## Adaptive performance
 
-`outputFacialTransformationMatrixes` returns the canonical-face→camera
-transform each frame. We extract the rotation block and decompose into
-Tait-Bryan angles. A landmark-geometry fallback (nose-tip displacement
-vs. eye span / face height) covers frames where the matrix is absent.
+Three independent rates:
 
-### Frame store outside React
-
-The pipeline writes into a plain mutable `TrackingFrame` object. The
-canvas reads it every rAF; React UI reads a snapshot at 10 Hz via
-`useTelemetry`. Nothing in the 30–60 Hz path triggers a React render.
-
-### Face-loss grace period
-
-`detectForVideo` occasionally returns zero faces for a single frame
-during fast motion or partial occlusion. The loop tolerates ≤6
-consecutive misses before clearing landmarks and resetting state —
-prevents flicker without masking genuine face loss.
-
-### Stability metric
-
-EMA of mean per-landmark displacement (sampled subset, every 12th point),
-normalized against a "deliberate motion" constant. Drives the
-tracking→locked transition and the `TRACKING: STABLE/UNSTABLE` label.
-Confidence is a persistence EMA (fraction of recent frames with a face).
-
-### Local vendored runtime
-
-`public/mediapipe/wasm/*` + `face_landmarker.task` are shipped with the
-app — no runtime CDN dependency, consistent with the privacy model.
-
-## Error handling
-
-| Condition | Behavior |
+| Rate | Mechanism |
 |---|---|
-| Permission denied | error veil + explanatory label + RETRY |
-| No camera | same, "no camera found" |
-| Non-secure context / old browser | "not supported" |
-| Camera unplugged mid-session | `ended` track event → error state |
-| Model/WASM failure | GPU delegate → CPU retry → error state |
-| Temporary face loss | 6-frame grace → back to searching |
+| Camera | `video.currentTime` advance detection |
+| Inference | `InferenceScheduler` — min interval adapts to measured latency (≈2.5× inferenceMs, clamped 30–90ms) |
+| Render | rAF always; `LandmarkSmoother.update()` re-filters the last raw result every frame, so geometry animates smoothly between inferences |
 
-## Performance notes (target: i5-1155G7 / Iris Xe)
+The One Euro filter converging on the latest raw values *is* the
+interpolation mechanism — no separate extrapolator needed.
 
-- 720p input, VIDEO running mode (MediaPipe's internal temporal tracking
-  is cheaper than per-frame detection)
-- GPU delegate primary; the detect call is async on GPU and the loop only
-  runs inference when `video.currentTime` advances (no wasted work)
-- Canvas sized to `devicePixelRatio` (capped at 2) once per resize
-- Landmark smoothing ~478×3 One Euro filters — ~1ms of pure JS per frame
-- Observed: see README; verify FPS in the telemetry panel on target HW
+## Renderer design (Layer B)
 
-## Known limitations / V2 candidates
+Hierarchical visual weights:
+- **L1** face oval — strongest stroke, clean silhouette
+- **L2** eyes / brows / lips / iris — medium emphasis
+- **L3** secondary contours — faint topology
+- **L4** sparse scaffold (every 6th tessellation edge) — intensity
+  modulated by normalized landmark z = the "relative depth field"
+- **L5** locked-state surface tint + nose-bridge anchor
 
-- Pose matrix sign conventions verified on mirrored preview; extreme
-  head angles (>~60° yaw) degrade landmark quality — MediaPipe limit.
-- Iris landmarks exist but are not smoothed separately (they ride the
-  shared filter bank).
-- `numFaces=2`: a third+ person in frame is ignored entirely.
-- Front-facing only (`facingMode: "user"`); no camera selector.
-- V2 ideas: 3D shaded mesh via R3F, attention/gaze vector, recording of
-  telemetry (not video), calibration screen, WebGPU delegate.
+Gaze vectors are short lines from iris centers, flipped with mirroring,
+attenuated by gaze confidence. Occlusion (`frame.occluded`) fades the
+whole layer ~45% and suppresses iris/gaze geometry.
+
+**Why not Three.js**: the landmark field is 2D-projected data; the
+heaviest frame is ~800 line segments — trivial for canvas 2D on Iris Xe
+and phone GPUs. A WebGL surface is a legitimate V3 option; the seam is
+`FaceMeshOverlay` (the only file that draws).
+
+## Signals
+
+- **Pose**: Tait-Bryan decomposition of the facial transformation matrix;
+  landmark-geometry fallback when absent.
+- **Gaze**: iris-center offset within each eye-corner frame, aperture-
+  weighted, labeled LEFT/RIGHT/UP/DOWN/CENTER or LOW CONFIDENCE.
+- **Dynamics**: eye/mouth apertures (geometry-normalized), brow raise,
+  lip spread + blendshape blink/smile/jawOpen, motion-energy EMA.
+- **Depth**: z normalized per frame → per-landmark 0..1 (nose≈0, edge≈1).
+- **Lighting**: 32×24 frame sample every 400ms → mean, contrast, gradient
+  direction → DIFFUSE / LEFT-KEY / RIGHT-KEY / TOP-KEY / LOW LIGHT.
+- **Stability**: EMA of mean landmark displacement (12th-point subset).
+- **Occlusion**: bbox edge contact OR presence-EMA dip while face present.
+
+## Deep Scan
+
+`DeepScanCollector` samples the frame store for 4s and distills:
+geometry completeness, mean stability %, pose spread (σ of yaw), gaze
+confidence %, dynamics energy, illumination label, tracking quality —
+rendered as a qualitative Visual Profile. No evaluative claims.
+
+## Privacy
+
+All inference is on-device WASM. Frames never leave the browser; no
+uploads, storage, or analytics. Vendored model/WASM means zero runtime
+CDN dependency.
+
+## Known limitations
+
+- `numFaces=2`; largest face wins.
+- Gaze is monocular + uncalibrated — directional only.
+- Depth field is relative per-frame; not temporally stabilized or metric.
+- Lighting reads the whole frame, not face-local photometry.
+- MediaPipe degrades at extreme head angles / heavy occlusion — the app
+  detects and degrades gracefully rather than fixing it.

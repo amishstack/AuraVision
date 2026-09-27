@@ -208,7 +208,8 @@ export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
       if (f.gaze && f.gaze.confidence > 0.35 && !f.occluded && sFeat > 0.5) {
         const g = f.gaze;
         const len = 26 * dpr * Math.min(1, Math.hypot(g.dx, g.dy) + 0.4);
-        const vx = g.dx * len * (mirror ? -1 : 1);
+        // g.dx is already in screen space (mirror-corrected upstream).
+        const vx = g.dx * len;
         const vy = g.dy * len;
         ctx.strokeStyle = `rgba(${ACCENT}, ${0.4 * e * g.confidence})`;
         ctx.lineWidth = 1 * dpr;
