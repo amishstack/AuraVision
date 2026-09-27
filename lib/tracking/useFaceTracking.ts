@@ -5,13 +5,19 @@ import type { FaceLandmarkerResult } from "@mediapipe/tasks-vision";
 import { acquireCamera, releaseCamera, cameraErrorFrom, type CameraHandle } from "@/lib/vision/camera";
 import { loadFaceLandmarker } from "@/lib/vision/faceLandmarker";
 import { LandmarkSmoother } from "@/lib/smoothing/landmarkSmoother";
+import { InferenceScheduler } from "@/lib/performance/scheduler";
+import { LightingAnalyzer } from "@/lib/lighting/lighting";
+import { DeepScanCollector } from "@/lib/scan/deepScan";
+import { estimateGaze } from "@/lib/gaze/gaze";
+import { measureDynamics, type BlendshapeSignals } from "@/lib/dynamics/dynamics";
+import { computeDepthField } from "@/lib/depth/depth";
 import { poseFromMatrix, poseFromLandmarks } from "@/lib/geometry/pose";
 import { boundingBoxOf, faceArea } from "@/lib/geometry/mesh";
 import type {
-  ExpressionSignals,
   HeadPose,
   Landmark,
   TrackingFrame,
+  TrackingState,
 } from "@/types/vision";
 
 export function createInitialFrame(): TrackingFrame {
@@ -21,9 +27,13 @@ export function createInitialFrame(): TrackingFrame {
     landmarks: null,
     rawLandmarks: null,
     pose: null,
-    expression: null,
+    gaze: null,
+    dynamics: null,
+    lighting: null,
+    depth: null,
     metrics: {
       fps: 0,
+      inferenceHz: 0,
       inferenceMs: 0,
       landmarkCount: 0,
       facesDetected: 0,
@@ -33,11 +43,23 @@ export function createInitialFrame(): TrackingFrame {
     boundingBox: null,
     framesWithFace: 0,
     mirrored: true,
+    stateAge: 0,
+    initProgress: 0,
+    occluded: false,
+    scanProgress: 0,
+    profile: null,
   };
 }
 
-/** Blendshape categories we care about for expression signals. */
-function extractExpression(result: FaceLandmarkerResult, faceIndex: number): ExpressionSignals | null {
+// Initialization-sequence pacing (seconds)
+const T_DETECTED = 0.45;
+const T_INIT = 1.9;
+const LOCK_FRAMES = 60;
+
+function extractBlendshapes(
+  result: FaceLandmarkerResult,
+  faceIndex: number,
+): BlendshapeSignals | null {
   const bs = result.faceBlendshapes?.[faceIndex]?.categories;
   if (!bs) return null;
   const get = (name: string) =>
@@ -46,100 +68,153 @@ function extractExpression(result: FaceLandmarkerResult, faceIndex: number): Exp
     blinkLeft: get("eyeBlinkLeft"),
     blinkRight: get("eyeBlinkRight"),
     smile: (get("mouthSmileLeft") + get("mouthSmileRight")) / 2,
-    mouthOpen: get("jawOpen"),
+    jawOpen: get("jawOpen"),
   };
 }
 
-/**
- * Owns the whole real-time pipeline: camera → inference → smoothing →
- * pose → metrics, written into a mutable TrackingFrame ref that the
- * canvas renderer and telemetry poll read at their own cadence.
- */
+export interface TrackingControls {
+  frameRef: MutableRefObject<TrackingFrame>;
+  /** Request a Deep Scan — takes effect when tracking is stable. */
+  startDeepScan: () => void;
+  /** Leave the visual-profile screen, back to live tracking. */
+  exitProfile: () => void;
+}
+
 export function useFaceTracking(
   videoRef: MutableRefObject<HTMLVideoElement | null>,
   session = 0,
   facingMode: "user" | "environment" = "user",
-) {
+): TrackingControls {
   const frameRef = useRef<TrackingFrame>(createInitialFrame());
+  const scanRequested = useRef(false);
+  const profileExit = useRef(false);
 
   useEffect(() => {
-    // Reset stale frame data on (re)boot — e.g. after a camera retry.
     Object.assign(frameRef.current, createInitialFrame());
     const frame = frameRef.current;
     let cancelled = false;
     let raf = 0;
     let camera: CameraHandle | null = null;
     const smoother = new LandmarkSmoother(1.2, 0.6);
+    const scheduler = new InferenceScheduler();
+    const lighting = new LightingAnalyzer(400);
+    const deepScan = new DeepScanCollector();
 
-    let lastTs = 0;
+    let prevRaf = performance.now();
     let fpsEma = 0;
     let inferenceEma = 0;
     let speedEma = 0;
     let presenceEma = 0;
     let prevSmoothed: Landmark[] | null = null;
     let lostFrames = 0;
+    let stateStart = performance.now();
+    let rawCache: Landmark[] | null = null;
+
+    const setState = (s: TrackingState, now: number) => {
+      if (frame.state !== s) {
+        frame.state = s;
+        stateStart = now;
+      }
+    };
 
     async function boot() {
-      frame.state = "boot";
       try {
         const landmarker = await loadFaceLandmarker();
         if (cancelled) return;
 
-        frame.state = "idle";
         camera = await acquireCamera(videoRef.current ?? undefined, facingMode);
         if (cancelled) return;
-        // Front camera previews are mirrored (like a mirror); rear camera
-        // is shown unmirrored. Landmark mapping uses the same flag.
         frame.mirrored = facingMode === "user";
 
-        // Detect mid-session camera disconnect.
         for (const track of camera.stream.getVideoTracks()) {
           track.addEventListener("ended", () => {
-            frame.state = "error";
+            setState("error", performance.now());
             frame.cameraError = "disconnected";
           });
         }
 
-        frame.state = "searching";
+        setState("searching", performance.now());
 
         const loop = () => {
           if (cancelled || !camera) return;
+          raf = requestAnimationFrame(loop);
           const video = camera.video;
           const now = performance.now();
 
-          if (video.readyState >= 2 && video.currentTime !== lastTs) {
-            lastTs = video.currentTime;
-            const t0 = performance.now();
-            const result = landmarker.detectForVideo(video, now);
-            inferenceEma = ema(inferenceEma, performance.now() - t0, 0.15);
-
-            processResult(result, now / 1000);
-          }
-
-          const dt = now - (loop as unknown as { _p?: number })._p!;
-          (loop as unknown as { _p?: number })._p = now;
+          // --- render-rate metrics ------------------------------------
+          const dt = now - prevRaf;
+          prevRaf = now;
           if (dt > 0 && dt < 500) fpsEma = ema(fpsEma, 1000 / dt, 0.08);
           frame.metrics.fps = fpsEma;
           frame.metrics.inferenceMs = inferenceEma;
+          frame.metrics.inferenceHz = scheduler.inferenceHz(now);
+          frame.stateAge = (now - stateStart) / 1000;
 
-          raf = requestAnimationFrame(loop);
+          // --- inference (scheduled) -----------------------------------
+          if (scheduler.shouldInfer(video, inferenceEma, now)) {
+            const t0 = performance.now();
+            const result = landmarker.detectForVideo(video, now);
+            inferenceEma = ema(inferenceEma, performance.now() - t0, 0.15);
+            processResult(result);
+          }
+
+          // --- render-rate smoothing (interpolates between inferences)
+          if (rawCache && frame.landmarks) {
+            frame.landmarks = smoother.update(rawCache, now / 1000);
+          }
+
+          // --- lighting (self-throttled) -------------------------------
+          frame.lighting = lighting.update(video, now);
+
+          // --- deep scan lifecycle -------------------------------------
+          if (scanRequested.current) {
+            scanRequested.current = false;
+            if (frame.state === "tracking" || frame.state === "locked") {
+              deepScan.begin(now);
+              setState("deep_scan", now);
+            }
+          }
+          if (frame.state === "deep_scan") {
+            frame.scanProgress = deepScan.progress(now);
+            deepScan.sample({
+              now,
+              facePresent: frame.landmarks !== null,
+              stability: frame.metrics.stability,
+              presence: presenceEma,
+              landmarkCount: frame.metrics.landmarkCount,
+              pose: frame.pose,
+              gaze: frame.gaze,
+              dynamics: frame.dynamics,
+              lighting: frame.lighting,
+            });
+            if (deepScan.isDone(now)) {
+              frame.profile = deepScan.finish();
+              frame.scanProgress = 1;
+              setState("complete", now);
+            }
+          }
+          if (profileExit.current) {
+            profileExit.current = false;
+            frame.profile = null;
+            setState(
+              frame.landmarks ? "tracking" : "searching",
+              now,
+            );
+          }
         };
-        (loop as unknown as { _p?: number })._p = performance.now();
         raf = requestAnimationFrame(loop);
       } catch (err) {
         if (cancelled) return;
-        frame.state = "error";
+        setState("error", performance.now());
         frame.cameraError =
-          (err as Error)?.name === "NotSupported"
+          (err as Error)?.name === "NotSupported" ||
+          (err as Error)?.message === "unsupported"
             ? "not-supported"
             : cameraErrorFrom(err);
-        if ((err as Error)?.message === "unsupported") {
-          frame.cameraError = "not-supported";
-        }
       }
     }
 
-    function processResult(result: FaceLandmarkerResult, tSec: number) {
+    function processResult(result: FaceLandmarkerResult) {
       const count = result.faceLandmarks?.length ?? 0;
       frame.metrics.facesDetected = count;
       presenceEma = ema(presenceEma, count > 0 ? 1 : 0, 0.1);
@@ -148,15 +223,28 @@ export function useFaceTracking(
       if (count === 0) {
         lostFrames++;
         frame.framesWithFace = 0;
-        // Brief grace period before declaring the face gone — absorbs
-        // single-frame dropouts during fast moves or occlusion.
         if (lostFrames > 6) {
-          frame.state = "searching";
+          // Was tracked → brief LOST state, then back to searching.
+          const wasTracking =
+            frame.state === "tracking" ||
+            frame.state === "locked" ||
+            frame.state === "occluded" ||
+            frame.state === "deep_scan";
+          if (frame.state !== "searching" && frame.state !== "lost") {
+            setState(wasTracking ? "lost" : "searching", performance.now());
+          }
+          if (frame.state === "lost" && frame.stateAge > 1.2) {
+            setState("searching", performance.now());
+          }
           frame.landmarks = null;
           frame.rawLandmarks = null;
           frame.pose = null;
-          frame.expression = null;
+          frame.gaze = null;
+          frame.dynamics = null;
+          frame.depth = null;
           frame.boundingBox = null;
+          frame.occluded = false;
+          rawCache = null;
           smoother.reset();
           prevSmoothed = null;
         }
@@ -176,55 +264,94 @@ export function useFaceTracking(
       }
 
       const raw = result.faceLandmarks[best] as Landmark[];
+      rawCache = raw;
       frame.rawLandmarks = raw;
-      const smoothed = smoother.update(raw, tSec);
+      const smoothed = smoother.update(raw, performance.now() / 1000);
       frame.landmarks = smoothed;
       frame.metrics.landmarkCount = smoothed.length;
       frame.framesWithFace++;
 
-      // --- stability: EMA of mean landmark displacement -------------
+      // --- temporal motion energy + stability --------------------------
       if (prevSmoothed) {
         let sum = 0;
-        const step = 12; // sample a representative subset
+        const step = 12;
         const n = Math.floor(smoothed.length / step);
         for (let i = 0; i < smoothed.length; i += step) {
-          sum += Math.hypot(smoothed[i].x - prevSmoothed[i].x,
-                            smoothed[i].y - prevSmoothed[i].y);
+          sum += Math.hypot(
+            smoothed[i].x - prevSmoothed[i].x,
+            smoothed[i].y - prevSmoothed[i].y,
+          );
         }
         speedEma = ema(speedEma, sum / Math.max(n, 1), 0.2);
       }
       prevSmoothed = smoothed.map((p) => ({ ...p }));
-      // Normalize: ~0.015 normalized-units/frame ≈ deliberate motion.
       const stability = clamp01(1 - speedEma / 0.015);
       frame.metrics.stability = stability;
 
-      // --- pose -------------------------------------------------------
-      let pose: HeadPose | null = null;
+      // --- derived signals ----------------------------------------------
       const mat = result.facialTransformationMatrixes?.[best]?.data;
-      if (mat && mat.length >= 12) {
-        pose = poseFromMatrix(mat);
-      } else {
-        pose = poseFromLandmarks(raw);
-      }
+      const pose: HeadPose | null =
+        mat && mat.length >= 12 ? poseFromMatrix(mat) : poseFromLandmarks(raw);
       frame.pose = pose;
-
-      frame.expression = extractExpression(result, best);
+      frame.gaze = estimateGaze(smoothed);
+      frame.dynamics = measureDynamics(
+        smoothed,
+        extractBlendshapes(result, best),
+        clamp01(speedEma / 0.02),
+      );
+      const depthField = computeDepthField(smoothed);
+      frame.depth = depthField?.info ?? null;
       frame.boundingBox = boundingBoxOf(smoothed);
 
-      // --- state machine ---------------------------------------------
-      if (frame.state === "searching" || frame.state === "idle") {
-        frame.state = "detected";
-      } else if (frame.state === "detected" && frame.framesWithFace > 8) {
-        frame.state = "tracking";
-      } else if (
-        frame.state === "tracking" &&
-        frame.framesWithFace > 60 &&
-        stability > 0.55 &&
-        presenceEma > 0.9
-      ) {
-        frame.state = "locked";
-      } else if (frame.state === "locked" && (stability < 0.35 || presenceEma < 0.8)) {
-        frame.state = "tracking";
+      // --- occlusion / degradation heuristic ----------------------------
+      const bb = frame.boundingBox;
+      const edge = bb
+        ? bb.x < 0.01 || bb.y < 0.01 || bb.x + bb.w > 0.99 || bb.y + bb.h > 0.99
+        : false;
+      frame.occluded =
+        edge || (presenceEma < 0.75 && frame.framesWithFace > 5);
+
+      // --- state machine ------------------------------------------------
+      const now = performance.now();
+      switch (frame.state) {
+        case "searching":
+        case "lost":
+          setState("detected", now);
+          break;
+        case "detected":
+          if (frame.stateAge >= T_DETECTED) setState("initializing", now);
+          break;
+        case "initializing":
+          frame.initProgress = Math.min(frame.stateAge / T_INIT, 1);
+          if (frame.stateAge >= T_INIT) {
+            frame.initProgress = 1;
+            setState("tracking", now);
+          }
+          break;
+        case "tracking":
+          if (frame.occluded) setState("occluded", now);
+          else if (
+            frame.framesWithFace > LOCK_FRAMES &&
+            stability > 0.55 &&
+            presenceEma > 0.9
+          ) {
+            setState("locked", now);
+          }
+          break;
+        case "locked":
+          if (frame.occluded) setState("occluded", now);
+          else if (stability < 0.35 || presenceEma < 0.8) {
+            setState("tracking", now);
+          }
+          break;
+        case "occluded":
+          if (!frame.occluded) setState("tracking", now);
+          break;
+        case "deep_scan":
+          // handled in the rAF loop; keep scanning even if degraded
+          break;
+        default:
+          break;
       }
     }
 
@@ -234,10 +361,19 @@ export function useFaceTracking(
       cancelled = true;
       cancelAnimationFrame(raf);
       releaseCamera(camera);
+      lighting.reset();
     };
   }, [videoRef, session, facingMode]);
 
-  return { frameRef };
+  return {
+    frameRef,
+    startDeepScan: () => {
+      scanRequested.current = true;
+    },
+    exitProfile: () => {
+      profileExit.current = true;
+    },
+  };
 }
 
 function ema(prev: number, value: number, alpha: number): number {

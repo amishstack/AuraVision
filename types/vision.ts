@@ -5,12 +5,16 @@ export interface Landmark {
 }
 
 export type TrackingState =
-  | "boot"        // model / wasm loading
-  | "idle"        // camera starting
-  | "searching"   // camera live, no face
-  | "detected"    // face seen this frame, landmarks initializing
-  | "tracking"    // landmarks flowing
-  | "locked"      // sustained stable tracking
+  | "boot"          // model / wasm loading
+  | "searching"     // camera live, no face
+  | "detected"      // face seen, brief acknowledgment
+  | "initializing"  // cinematic acquisition sequence
+  | "tracking"      // landmarks flowing
+  | "locked"        // sustained stable temporal lock
+  | "occluded"      // face present but landmark quality degraded
+  | "lost"          // face was tracked, recently disappeared
+  | "deep_scan"     // user-triggered multi-second analysis pass
+  | "complete"      // visual profile screen
   | "error";
 
 export type CameraError =
@@ -27,20 +31,54 @@ export interface HeadPose {
   rollDeg: number;  // + = clockwise tilt
 }
 
-export interface ExpressionSignals {
-  blinkLeft: number;   // 0..1
-  blinkRight: number;  // 0..1
-  smile: number;       // 0..1
-  mouthOpen: number;   // 0..1
+export type GazeLabel =
+  | "CENTER" | "LEFT" | "RIGHT" | "UP" | "DOWN"
+  | "UP-LEFT" | "UP-RIGHT" | "LOW CONFIDENCE";
+
+export interface GazeEstimate {
+  /** Horizontal gaze offset, roughly -1..+1 (negative = looking left). */
+  dx: number;
+  /** Vertical gaze offset, roughly -1..+1 (negative = looking up). */
+  dy: number;
+  confidence: number; // 0..1
+  label: GazeLabel;
+}
+
+export interface FacialDynamics {
+  eyeAperture: number;  // normalized eye openness, ~0..1
+  mouthAperture: number; // normalized lip gap, ~0..1
+  browRaise: number;    // normalized brow-to-eye distance
+  lipSpread: number;    // mouth width relative to face width
+  jawOpen: number;      // 0..1 (blendshape when available)
+  blinkLeft: number;    // 0..1 blendshape
+  blinkRight: number;   // 0..1 blendshape
+  smile: number;        // 0..1 blendshape
+  /** EMA of landmark-field motion — "temporal landmark motion". */
+  energy: number;       // 0..1
+}
+
+export interface LightingInfo {
+  mean: number;      // 0..1 average luminance
+  contrast: number;  // 0..1 std-dev of luminance
+  dirX: number;      // -1..1 illumination gradient (bright side)
+  dirY: number;      // -1..1
+  label: string;     // human-readable summary
+}
+
+export interface DepthInfo {
+  /** Normalized per-landmark depth curve stats (relative, unitless). */
+  range: number;
+  valid: boolean;
 }
 
 export interface FrameMetrics {
-  fps: number;
+  fps: number;           // render loop rate
+  inferenceHz: number;   // actual model invocations / second
   inferenceMs: number;
   landmarkCount: number;
   facesDetected: number;
-  confidence: number;   // 0..1 tracking confidence heuristic
-  stability: number;    // 0..1 smoothed-landmark stability
+  confidence: number;    // presence persistence 0..1
+  stability: number;     // smoothed-landmark stability 0..1
 }
 
 export interface BoundingBox {
@@ -50,20 +88,45 @@ export interface BoundingBox {
   h: number;
 }
 
-/**
- * Mutable per-frame store written by the tracking loop and read by the
- * render + telemetry layers. Kept outside React state on purpose so the
- * ~60Hz pipeline never triggers React re-renders.
- */
+export interface VisualProfile {
+  durationMs: number;
+  geometry: string;      // e.g. "FACIAL CONTOUR ACQUIRED"
+  stabilityPct: number;  // 0..100
+  stabilityLabel: string;
+  poseSpreadDeg: number;
+  gazeConfidencePct: number;
+  dynamicsEnergy: string; // LOW / MODERATE / HIGH
+  lighting: string;      // e.g. "LEFT-KEY DIRECTIONAL"
+  trackingQuality: string;
+  landmarkCount: number;
+}
+
+/** Mutable per-frame store — written by the tracking loop, read by the
+ *  renderer every rAF and by React telemetry at ~10 Hz. */
 export interface TrackingFrame {
   state: TrackingState;
   cameraError: CameraError | null;
-  landmarks: Landmark[] | null;        // smoothed, normalized coords
-  rawLandmarks: Landmark[] | null;     // unsmoothed, for debug
+  landmarks: Landmark[] | null;        // smoothed, normalized
+  rawLandmarks: Landmark[] | null;
   pose: HeadPose | null;
-  expression: ExpressionSignals | null;
+  gaze: GazeEstimate | null;
+  dynamics: FacialDynamics | null;
+  lighting: LightingInfo | null;
+  depth: DepthInfo | null;
   metrics: FrameMetrics;
   boundingBox: BoundingBox | null;
   framesWithFace: number;
   mirrored: boolean;
+
+  // --- V2 additions ---------------------------------------------------
+  /** Seconds since current state began (drives init-sequence timing). */
+  stateAge: number;
+  /** Fractional progress of the initialization sequence, 0..1. */
+  initProgress: number;
+  /** Edge contact / degraded-quality flag while a face is present. */
+  occluded: boolean;
+  /** Deep Scan progress 0..1 while state === "deep_scan". */
+  scanProgress: number;
+  /** Latest visual profile (valid in "complete" state). */
+  profile: VisualProfile | null;
 }

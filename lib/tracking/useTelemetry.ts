@@ -21,8 +21,12 @@ export function useTelemetry(
         ...f,
         metrics: { ...f.metrics },
         pose: f.pose ? { ...f.pose } : null,
-        expression: f.expression ? { ...f.expression } : null,
+        gaze: f.gaze ? { ...f.gaze } : null,
+        dynamics: f.dynamics ? { ...f.dynamics } : null,
+        lighting: f.lighting ? { ...f.lighting } : null,
+        depth: f.depth ? { ...f.depth } : null,
         boundingBox: f.boundingBox ? { ...f.boundingBox } : null,
+        profile: f.profile ? { ...f.profile } : null,
       });
     }, 1000 / hz);
     return () => clearInterval(id);

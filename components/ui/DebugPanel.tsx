@@ -2,23 +2,23 @@
 
 import type { TrackingFrame } from "@/types/vision";
 
-/**
- * Toggleable diagnostics readout — inference latency, raw counts, pose
- * and expression signals. Deliberately plain; hidden in production mode.
- */
+/** Toggleable diagnostics — deliberately separated from the public UI. */
 export default function DebugPanel({ snap }: { snap: TrackingFrame }) {
   const m = snap.metrics;
-  const e = snap.expression;
+  const g = snap.gaze;
+  const d = snap.dynamics;
   const p = snap.pose;
+  const l = snap.lighting;
 
   const rows: [string, string][] = [
     ["STATE", snap.state],
     ["FACES", String(m.facesDetected)],
     ["LANDMARKS", String(m.landmarkCount)],
-    ["INFERENCE", `${m.inferenceMs.toFixed(1)} ms`],
-    ["FPS", m.fps.toFixed(1)],
+    ["RENDER FPS", m.fps.toFixed(1)],
+    ["INFERENCE", `${m.inferenceMs.toFixed(1)} ms @ ${m.inferenceHz.toFixed(0)} Hz`],
     ["CONFIDENCE", m.confidence.toFixed(2)],
     ["STABILITY", m.stability.toFixed(2)],
+    ["OCCLUDED", String(snap.occluded)],
     ["FRAMES W/ FACE", String(snap.framesWithFace)],
   ];
   if (p) {
@@ -28,11 +28,24 @@ export default function DebugPanel({ snap }: { snap: TrackingFrame }) {
       ["ROLL", `${p.rollDeg.toFixed(1)}°`],
     );
   }
-  if (e) {
+  if (g) {
     rows.push(
-      ["BLINK L/R", `${e.blinkLeft.toFixed(2)} / ${e.blinkRight.toFixed(2)}`],
-      ["SMILE", e.smile.toFixed(2)],
-      ["MOUTH OPEN", e.mouthOpen.toFixed(2)],
+      ["GAZE", `${g.dx.toFixed(2)},${g.dy.toFixed(2)} ${g.label}`],
+      ["GAZE CONF", g.confidence.toFixed(2)],
+    );
+  }
+  if (d) {
+    rows.push(
+      ["EYE AP", d.eyeAperture.toFixed(2)],
+      ["MOUTH AP", d.mouthAperture.toFixed(2)],
+      ["SMILE", d.smile.toFixed(2)],
+      ["ENERGY", d.energy.toFixed(2)],
+    );
+  }
+  if (l) {
+    rows.push(
+      ["LIGHT", `${l.label}`],
+      ["LUM/CON", `${l.mean.toFixed(2)} / ${l.contrast.toFixed(2)}`],
     );
   }
   if (snap.boundingBox) {
