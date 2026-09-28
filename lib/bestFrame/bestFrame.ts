@@ -1,5 +1,5 @@
 import { scoreFrame, type FrameScore, type FrameScoreInput } from "./scoring";
-import type { Landmark } from "@/types/vision";
+import type { BestFrameResult, Landmark } from "@/types/vision";
 
 /**
  * Best Frame engine — continuously evaluates candidate frames while a
@@ -19,12 +19,42 @@ export interface BestFrameCandidate {
 }
 
 const KEEP = 3;
-const EVAL_INTERVAL_MS = 500;
-const THUMB_H = 220;
+const DEFAULT_INTERVAL_MS = 500;
+const THUMB_H = 360;
+const HISTORY_KEEP = 9;
+
+export interface FrameHistoryEntry {
+  quality: number; // 0..100
+  isBest: boolean;
+}
+
+export function toBestFrameResult(c: BestFrameCandidate): BestFrameResult {
+  return {
+    image: c.image,
+    landmarks: c.landmarks,
+    crop: c.crop,
+    parts: {
+      lighting: Math.round(c.score.parts.lighting * 100),
+      framing: Math.round(c.score.parts.framing * 100),
+      angle: Math.round(c.score.parts.angle * 100),
+      visibility: Math.round(c.score.parts.visibility * 100),
+      gaze: Math.round(c.score.parts.gaze * 100),
+      steadiness: Math.round(c.score.parts.steadiness * 100),
+    },
+    angleLabel:
+      Math.abs(c.yawDeg) < 12
+        ? "FRONTAL"
+        : c.yawDeg < 0
+          ? "LEFT 3/4"
+          : "RIGHT 3/4",
+  };
+}
 
 export class BestFrameEngine {
   private top: BestFrameCandidate[] = [];
+  private history: FrameHistoryEntry[] = [];
   private lastEval = 0;
+  private newBestAt = 0;
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private evaluated = 0;
@@ -33,8 +63,9 @@ export class BestFrameEngine {
     video: HTMLVideoElement,
     input: FrameScoreInput & { landmarks: Landmark[] | null; mirrored: boolean },
     now: number,
+    intervalMs: number = DEFAULT_INTERVAL_MS,
   ): void {
-    if (now - this.lastEval < EVAL_INTERVAL_MS) return;
+    if (now - this.lastEval < intervalMs) return;
     if (!input.landmarks || !input.boundingBox || input.occluded) return;
     if (video.videoWidth === 0) return;
     this.lastEval = now;
@@ -85,9 +116,20 @@ export class BestFrameEngine {
       yawDeg: input.pose?.yawDeg ?? 0,
     };
 
+    const prevBest = this.top[0]?.score.total ?? -1;
     this.top.push(cand);
     this.top.sort((a, b) => b.score.total - a.score.total);
     if (this.top.length > KEEP) this.top.length = KEEP;
+    if (score.total > prevBest) this.newBestAt = now;
+
+    this.history.push({
+      quality: Math.round(score.total * 100),
+      isBest: this.top[0] === cand,
+    });
+    if (this.history.length > HISTORY_KEEP) this.history.shift();
+    // re-mark: best may have changed
+    const bestScore = this.top[0].score.total;
+    for (const h of this.history) h.isBest = h.quality === Math.round(bestScore * 100);
   }
 
   evaluatedCount(): number {
@@ -102,9 +144,23 @@ export class BestFrameEngine {
     return this.top;
   }
 
+  historyEntries(): readonly FrameHistoryEntry[] {
+    return this.history;
+  }
+
+  lastNewBestAt(): number {
+    return this.newBestAt;
+  }
+
+  bestQualityPct(): number {
+    return this.top[0] ? Math.round(this.top[0].score.total * 100) : 0;
+  }
+
   reset(): void {
     this.top = [];
+    this.history = [];
     this.evaluated = 0;
     this.lastEval = 0;
+    this.newBestAt = 0;
   }
 }

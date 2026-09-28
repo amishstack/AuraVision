@@ -4,7 +4,7 @@ import { analyzePalette } from "@/lib/analysis/palette";
 import { deriveVibe } from "@/lib/analysis/vibe";
 import { derivePresence } from "@/lib/analysis/presence";
 import { deriveAura } from "@/lib/analysis/aura";
-import type { BestFrameCandidate } from "@/lib/bestFrame/bestFrame";
+import { toBestFrameResult, type BestFrameCandidate } from "@/lib/bestFrame/bestFrame";
 import type {
   AnalysisReport,
   BoundingBox,
@@ -45,7 +45,7 @@ export const PHASE_LABELS = [
   "SIGNATURE",
 ];
 
-const PHASE_MS = [1000, 900, 800, 1200, 1200, 700, 0, 700, 700]; // 6 is pose-gated
+const PHASE_MS = [1000, 900, 800, 1200, 1200, 700, 0, 1600, 700]; // 6 is pose-gated
 
 const PHASE_CAPTIONS = [
   "ACQUIRING VISUAL FIELD",
@@ -172,6 +172,11 @@ export class DeepAnalysisRunner {
 
   isDone(now: number): boolean {
     return this.phase === 8 && now - this.phaseStart >= PHASE_MS[8];
+  }
+
+  /** Current phase index (0..8). */
+  get phaseIndex(): number {
+    return this.phase;
   }
 
   /** Current symmetry field for the overlay ghost (phase 1). */
@@ -515,27 +520,7 @@ export class DeepAnalysisRunner {
       presence: presenceRes.descriptors,
       presenceBasis: presenceRes.basis,
       aura,
-      bestFrame: bestFrame
-          ? {
-              image: bestFrame.image,
-              landmarks: bestFrame.landmarks,
-              crop: bestFrame.crop,
-              parts: {
-                lighting: Math.round(bestFrame.score.parts.lighting * 100),
-                framing: Math.round(bestFrame.score.parts.framing * 100),
-                angle: Math.round(bestFrame.score.parts.angle * 100),
-                visibility: Math.round(bestFrame.score.parts.visibility * 100),
-                gaze: Math.round(bestFrame.score.parts.gaze * 100),
-                steadiness: Math.round(bestFrame.score.parts.steadiness * 100),
-              },
-              angleLabel:
-                Math.abs(bestFrame.yawDeg) < 12
-                  ? "FRONTAL"
-                  : bestFrame.yawDeg < 0
-                    ? "LEFT 3/4"
-                    : "RIGHT 3/4",
-            }
-          : null,
+      bestFrame: bestFrame ? toBestFrameResult(bestFrame) : null,
       candidatesEvaluated,
     };
   }

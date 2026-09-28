@@ -203,6 +203,16 @@ export interface TrackingFrame {
   scan: ScanPhaseUI | null;
   /** Symmetry field (per-landmark deviation 0..1) for the mirror ghost. */
   symmetryField: Float32Array | null;
+  /** Candidate history strip (last ~9 evaluations). */
+  frameCandidates: { quality: number; isBest: boolean }[];
+  /** Total candidates evaluated this pass. */
+  frameCandidateNo: number;
+  /** Best candidate quality 0..100. */
+  bestFrameQuality: number;
+  /** Timestamp of last "new best" event (ms) for the flash animation. */
+  newBestAt: number;
+  /** Frozen selected frame once the FRAME phase completes. */
+  optimalFrame: BestFrameResult | null;
   /** Latest analysis report (valid in "complete" state). */
   report: AnalysisReport | null;
 }

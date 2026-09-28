@@ -25,3 +25,27 @@ body {
     opacity: 1;
   }
 }
+
+@keyframes newBest {
+  0% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

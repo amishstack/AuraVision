@@ -14,6 +14,8 @@ export default function AuraVisionApp() {
   const [session, setSession] = useState(0);
   const [debug, setDebug] = useState(false);
   const [demo, setDemo] = useState(false);
+  // live-view override — reset automatically when a new optimal frame arrives
+  const [liveForImage, setLiveForImage] = useState<string | null>(null);
   const [facing, setFacing] = useState<"user" | "environment">("user");
   const { frameRef, startDeepScan, exitProfile } = useFaceTracking(
     videoRef,
@@ -29,6 +31,10 @@ export default function AuraVisionApp() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // live view applies only to the current optimal frame selection
+  const optimalImage = snap.optimalFrame?.image ?? null;
+  const optimalLive = liveForImage !== null && liveForImage === optimalImage;
 
   const isError = snap.state === "error";
   const mirrored = facing === "user";
@@ -110,6 +116,45 @@ export default function AuraVisionApp() {
             </div>
           )}
 
+          {/* optimal-frame freeze — the actual captured candidate */}
+          {snap.state === "analysis" && snap.optimalFrame && (
+            <div className="absolute inset-0 animate-[fadeIn_0.4s_ease-out]">
+              {!optimalLive && (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={snap.optimalFrame.image}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                  <div className="absolute left-3 top-9 font-mono text-[9px] tracking-[0.25em] sm:left-4 sm:top-10">
+                    <div className="text-neutral-200">OPTIMAL FRAME</div>
+                    <div className="mt-0.5 text-neutral-500">
+                      FRAME SELECTED — QUALITY {snap.bestFrameQuality}%
+                    </div>
+                    <div className="mt-2 space-y-0.5 text-[8px] tracking-[0.2em] text-neutral-500">
+                      <div>LIGHTING&nbsp;&nbsp;{qual(snap.optimalFrame.parts.lighting)}</div>
+                      <div>FRAMING&nbsp;&nbsp;&nbsp;{qual(snap.optimalFrame.parts.framing)}</div>
+                      <div>ANGLE&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{snap.optimalFrame.angleLabel}</div>
+                      <div>STABILITY&nbsp;{qual(snap.optimalFrame.parts.steadiness)}</div>
+                      <div>OCCLUSION&nbsp;{qual(100 - snap.optimalFrame.parts.visibility)}</div>
+                    </div>
+                  </div>
+                </>
+              )}
+              <button
+                onClick={() =>
+                  setLiveForImage((v) =>
+                    v === optimalImage ? null : optimalImage,
+                  )
+                }
+                className="absolute bottom-3 left-1/2 min-h-11 -translate-x-1/2 rounded border border-neutral-700 bg-black/60 px-5 font-mono text-[10px] tracking-[0.25em] text-neutral-200 backdrop-blur transition-colors hover:border-neutral-500"
+              >
+                {optimalLive ? "OPTIMAL FRAME" : "LIVE"}
+              </button>
+            </div>
+          )}
+
           {/* Layer C — system interface */}
           <SystemInterface snap={snap} debug={debug} />
 
@@ -155,4 +200,11 @@ export default function AuraVisionApp() {
       )}
     </main>
   );
+}
+
+function qual(v: number): string {
+  if (v >= 85) return "EXCELLENT";
+  if (v >= 65) return "GOOD";
+  if (v >= 45) return "MODERATE";
+  return "LOW";
 }

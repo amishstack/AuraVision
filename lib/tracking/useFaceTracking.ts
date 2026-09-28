@@ -8,7 +8,7 @@ import { LandmarkSmoother } from "@/lib/smoothing/landmarkSmoother";
 import { InferenceScheduler } from "@/lib/performance/scheduler";
 import { LightingAnalyzer } from "@/lib/lighting/lighting";
 import { DeepAnalysisRunner } from "@/lib/analysis/runner";
-import { BestFrameEngine } from "@/lib/bestFrame/bestFrame";
+import { BestFrameEngine, toBestFrameResult } from "@/lib/bestFrame/bestFrame";
 import { estimateGaze } from "@/lib/gaze/gaze";
 import { measureDynamics, type BlendshapeSignals } from "@/lib/dynamics/dynamics";
 import { computeDepthField } from "@/lib/depth/depth";
@@ -50,6 +50,11 @@ export function createInitialFrame(): TrackingFrame {
     scanProgress: 0,
     scan: null,
     symmetryField: null,
+    frameCandidates: [],
+    frameCandidateNo: 0,
+    bestFrameQuality: 0,
+    newBestAt: 0,
+    optimalFrame: null,
     report: null,
   };
 }
@@ -195,6 +200,7 @@ export function useFaceTracking(
                 mirrored: frame.mirrored,
               },
               now,
+              analysis.phaseIndex === 7 ? 250 : 500,
             );
           }
 
@@ -204,6 +210,11 @@ export function useFaceTracking(
             if (frame.state === "tracking" || frame.state === "locked") {
               analysis.begin(now);
               bestFrames.reset(); // recalibrate candidates for this pass
+              frame.optimalFrame = null;
+              frame.frameCandidates = [];
+              frame.frameCandidateNo = 0;
+              frame.bestFrameQuality = 0;
+              frame.newBestAt = 0;
               setState("analysis", now);
             }
           }
@@ -226,6 +237,19 @@ export function useFaceTracking(
               secondFaceCx,
               occluded: frame.occluded,
             });
+            // candidate strip UI state
+            frame.frameCandidates = bestFrames.historyEntries().map((h) => ({
+              quality: h.quality,
+              isBest: h.isBest,
+            }));
+            frame.frameCandidateNo = bestFrames.evaluatedCount();
+            frame.bestFrameQuality = bestFrames.bestQualityPct();
+            frame.newBestAt = bestFrames.lastNewBestAt();
+            // freeze the selected frame once the FRAME phase completes
+            if (analysis.phaseIndex >= 8 && !frame.optimalFrame) {
+              const best = bestFrames.best();
+              if (best) frame.optimalFrame = toBestFrameResult(best);
+            }
             if (analysis.isDone(now)) {
               frame.report = analysis.finish(
                 video,

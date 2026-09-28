@@ -94,7 +94,51 @@ export default function SystemInterface({
             <div className="mt-1 text-neutral-600">
               {Math.round(snap.scanProgress * 100)}%
             </div>
+            {/* FRAME phase — live candidate indicator */}
+            {snap.scan.checks.filter(Boolean).length === 7 &&
+              snap.frameCandidates.length > 0 && (
+                <div className="mt-3 animate-[fadeIn_0.3s_ease-out] text-[9px] tracking-[0.2em]">
+                  <div className="text-neutral-300">
+                    FRAME CANDIDATE{" "}
+                    {String(snap.frameCandidateNo).padStart(2, "0")}
+                    <span className="mx-2 text-neutral-700">·</span>
+                    QUALITY {snap.frameCandidates[snap.frameCandidates.length - 1].quality}%
+                  </div>
+                  <div className="mt-1">
+                    {snap.frameCandidates[snap.frameCandidates.length - 1].isBest ? (
+                      <span
+                        key={snap.frameCandidateNo}
+                        className="animate-[newBest_0.35s_ease-out] text-cyan-200/90"
+                      >
+                        NEW BEST FRAME
+                      </span>
+                    ) : (
+                      <span className="text-neutral-600">
+                        BEST {snap.bestFrameQuality}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
           </div>
+
+          {/* candidate history strip */}
+          {snap.frameCandidates.length > 0 && (
+            <div className="absolute bottom-[4.5rem] left-1/2 flex -translate-x-1/2 gap-1.5 sm:bottom-20">
+              {snap.frameCandidates.map((c, i) => (
+                <span
+                  key={i}
+                  className={`border px-1.5 py-0.5 font-mono text-[8px] tracking-[0.1em] tabular-nums ${
+                    c.isBest
+                      ? "border-cyan-300/60 text-cyan-200"
+                      : "border-neutral-800 text-neutral-600"
+                  }`}
+                >
+                  {c.quality}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="absolute bottom-12 left-1/2 -translate-x-1/2 font-mono text-[9px] tracking-[0.2em] sm:bottom-14">
             <div className="mb-1 text-center text-neutral-600">
               DEEP ANALYSIS
