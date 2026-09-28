@@ -1,3 +1,4 @@
+import { coverSourceRect } from "@/lib/vision/imageTransform";
 import type { DirectorResult } from "@/types/vision";
 
 /**
@@ -60,17 +61,8 @@ export async function renderPortraitArtifact(
     const pw = 720;
     const ph = 720;
     const ix = cx - pw / 2;
-    const srcAspect = img.width / img.height;
-    const dstAspect = pw / ph;
-    let sw = img.width, sh = img.height, sx = 0, sy = 0;
-    if (srcAspect > dstAspect) {
-      sw = sh * dstAspect;
-      sx = (img.width - sw) / 2;
-    } else {
-      sh = sw / dstAspect;
-      sy = (img.height - sh) / 2;
-    }
-    ctx.drawImage(img, sx, sy, sw, sh, ix, y, pw, ph);
+    const sr = coverSourceRect(img.width, img.height, pw, ph);
+    ctx.drawImage(img, sr.x, sr.y, sr.w, sr.h, ix, y, pw, ph);
     ctx.strokeStyle = FAINT;
     ctx.strokeRect(ix, y, pw, ph);
     y += ph;

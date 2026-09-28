@@ -120,6 +120,32 @@ heaviest frame is ~800 line segments — trivial for canvas 2D on Iris Xe
 and phone GPUs. A WebGL surface is a legitimate V3 option; the seam is
 `FaceMeshOverlay` (the only file that draws).
 
+## Canonical coordinate space (V6.2)
+
+All visual consumers map normalized MediaPipe landmarks through
+`lib/vision/imageTransform.ts` — the single place where coordinate math
+lives. Pipeline:
+
+```
+source video (videoWidth × videoHeight)
+  → normalized landmarks [0,1], unmirrored, y-down
+    → coverFit()        object-fit:cover viewport (FaceMeshOverlay)
+    → regionMapper()    flipped sub-rect draws (OptimalFrame,
+                        CameraGeometryBlend, SignatureMesh reference)
+    → coverSourceRect() share-artifact crops (portraitArtifact)
+```
+
+Mirroring convention: `mirrored` means the *rendered image* is flipped.
+The flip applies within the rect actually drawn — full-frame draws use
+`x' = 1 − x`; flipped sub-rect thumbnails use `x' = rect.x + rect.w − x`.
+Mirroring in full-frame space and then subtracting a crop origin (the
+pre-V6.2 bug) is off by `1 − 2·cropCenterX` whenever the face isn't
+frame-centered.
+
+DEBUG mode renders a LANDMARK REGISTRATION diagnostic on `OptimalFrame`:
+labeled marks at eye/nose/mouth/chin/jaw indices — they must sit exactly
+on the physical features of the captured frame.
+
 ## Signals
 
 - **Pose**: Tait-Bryan decomposition of the facial transformation matrix;

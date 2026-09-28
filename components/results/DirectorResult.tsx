@@ -14,12 +14,14 @@ export default function DirectorResult({
   result,
   frame,
   fun,
+  debug = false,
   onLive,
   onDeepAnalysis,
 }: {
   result: Result;
   frame: MutableRefObject<TrackingFrame>;
   fun: boolean;
+  debug?: boolean;
   onLive: () => void;
   onDeepAnalysis: () => void;
 }) {
@@ -72,7 +74,11 @@ export default function DirectorResult({
         {/* captured portrait — hero */}
         {result.frame && (
           <div className="my-6 w-full">
-            <OptimalFrame best={result.frame} mirrored={frame.current.mirrored} />
+            <OptimalFrame
+              best={result.frame}
+              mirrored={frame.current.mirrored}
+              debug={debug}
+            />
           </div>
         )}
 

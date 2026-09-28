@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { MESH, sparseScaffold, faceTriangles } from "@/lib/geometry/mesh";
 import type { Connection } from "@/lib/geometry/mesh";
 import { computeDepthField } from "@/lib/depth/depth";
+import { coverFit, throughCover } from "@/lib/vision/imageTransform";
 import type { TrackingFrame } from "@/types/vision";
 
 /**
@@ -95,15 +96,17 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
       const e = env.current * occlFade;
       if (e < 0.02) return;
 
-      // object-cover mapping (element may crop the source frame)
-      const vw = video.videoWidth || w;
-      const vh = video.videoHeight || h;
-      const cs = Math.max(w / vw, h / vh);
-      const dispW = vw * cs, dispH = vh * cs;
-      const offX = (w - dispW) / 2, offY = (h - dispH) / 2;
+      // object-cover mapping (element may crop the source frame) —
+      // canonical transform shared with all other visual consumers
+      const fit = coverFit(
+        video.videoWidth || w,
+        video.videoHeight || h,
+        w,
+        h,
+      );
+      const { dispW, dispH, offX, offY } = fit;
       const mirror = f.mirrored;
-      const px = (p: { x: number; y: number }) =>
-        [offX + (mirror ? 1 - p.x : p.x) * dispW, offY + p.y * dispH] as const;
+      const px = (p: { x: number; y: number }) => throughCover(p, fit, mirror);
 
       const lock = lockBlend.current;
       const lm = f.landmarks;

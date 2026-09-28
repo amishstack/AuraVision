@@ -20,12 +20,14 @@ export default function VisualSignature({
   frame,
   videoRef,
   fun = false,
+  debug = false,
   onClose,
 }: {
   report: AnalysisReport;
   frame: MutableRefObject<TrackingFrame>;
   videoRef: MutableRefObject<HTMLVideoElement | null>;
   fun?: boolean;
+  debug?: boolean;
   onClose: () => void;
 }) {
   const [showInfo, setShowInfo] = useState(false);
@@ -79,16 +81,21 @@ export default function VisualSignature({
             <div className="absolute inset-0 opacity-70">
               <AuraField report={report} size={300} />
             </div>
-            {report.bestFrame && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={report.bestFrame.image}
-                alt=""
-                aria-hidden
-                className="absolute inset-0 h-[300px] w-[300px] object-cover opacity-[0.13] blur-[2px]"
-              />
-            )}
-            <SignatureMesh points={report.signaturePoints} size={300} fun={fun} />
+            <SignatureMesh
+              points={report.signaturePoints}
+              reference={
+                report.bestFrame
+                  ? {
+                      image: report.bestFrame.image,
+                      landmarks: report.bestFrame.landmarks,
+                      crop: report.bestFrame.crop,
+                      mirrored: frame.current.mirrored,
+                    }
+                  : null
+              }
+              size={300}
+              fun={fun}
+            />
           </div>
           <div className="mt-2 text-center text-[9px] leading-4 tracking-[0.25em] text-neutral-500">
             MONOCULAR FACIAL RECONSTRUCTION
@@ -209,6 +216,7 @@ export default function VisualSignature({
             <OptimalFrame
               best={report.bestFrame}
               mirrored={frame.current.mirrored}
+              debug={debug}
             />
             <div className="mt-2 text-[8px] tracking-[0.2em] text-neutral-500">
               {report.candidatesEvaluated} CANDIDATES EVALUATED

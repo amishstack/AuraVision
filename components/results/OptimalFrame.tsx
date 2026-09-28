@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MESH, sparseScaffold } from "@/lib/geometry/mesh";
+import { regionMapper } from "@/lib/vision/imageTransform";
 import type { BestFrameResult } from "@/types/vision";
 
 /**
@@ -19,12 +20,25 @@ function label(v: number): string {
   return "LOW";
 }
 
+// semantic landmarks for the DEBUG registration diagnostic
+const REG_MARKS = [
+  [468, "L.EYE"],
+  [473, "R.EYE"],
+  [4, "NOSE"],
+  [13, "MOUTH"],
+  [152, "CHIN"],
+  [234, "L.JAW"],
+  [454, "R.JAW"],
+] as const;
+
 export default function OptimalFrame({
   best,
   mirrored,
+  debug = false,
 }: {
   best: BestFrameResult;
   mirrored: boolean;
+  debug?: boolean;
 }) {
   const [showGeo, setShowGeo] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -32,15 +46,22 @@ export default function OptimalFrame({
   const scaffold = useMemo(() => sparseScaffold(5), []);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [imgReady, setImgReady] = useState(false);
+  const [imgAspect, setImgAspect] = useState(4 / 4.4);
+  const debugRef = useRef(debug);
 
   useEffect(() => {
     geoRef.current = showGeo;
   }, [showGeo]);
 
   useEffect(() => {
+    debugRef.current = debug;
+  }, [debug]);
+
+  useEffect(() => {
     const img = new Image();
     img.onload = () => {
       imgRef.current = img;
+      setImgAspect(img.width / img.height);
       setImgReady(true);
     };
     img.src = best.image;
@@ -68,38 +89,61 @@ export default function OptimalFrame({
       ctx.clearRect(0, 0, W, H);
       ctx.drawImage(img, 0, 0, W, H);
 
-      if (!geoRef.current) return;
+      if (!geoRef.current && !debugRef.current) return;
 
-      // map captured landmark coords through the same crop
-      const c = best.crop;
-      const px = (p: { x: number; y: number }) => [
-        ((mirrored ? 1 - p.x : p.x) - c.x) / c.w * W,
-        (p.y - c.y) / c.h * H,
-      ] as const;
+      // canonical registration — the captured image was flipped within
+      // its crop rect, so the same rect-space mirror applies here
+      const px = regionMapper(best.crop, W, H, mirrored);
       const lm = best.landmarks;
       ctx.lineJoin = "round";
-      const edges = (
-        set: readonly { start: number; end: number }[],
-        col: string, a: number, wdt: number,
-      ) => {
-        ctx.strokeStyle = `rgba(${col}, ${a})`;
-        ctx.lineWidth = wdt * dpr;
-        ctx.beginPath();
-        for (const e of set) {
-          const A = lm[e.start], B = lm[e.end];
-          if (!A || !B) continue;
-          const [ax, ay] = px(A);
-          const [bx, by] = px(B);
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(bx, by);
+      if (geoRef.current) {
+        const edges = (
+          set: readonly { start: number; end: number }[],
+          col: string, a: number, wdt: number,
+        ) => {
+          ctx.strokeStyle = `rgba(${col}, ${a})`;
+          ctx.lineWidth = wdt * dpr;
+          ctx.beginPath();
+          for (const e of set) {
+            const A = lm[e.start], B = lm[e.end];
+            if (!A || !B) continue;
+            const [ax, ay] = px(A);
+            const [bx, by] = px(B);
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(bx, by);
+          }
+          ctx.stroke();
+        };
+        edges(scaffold, ACCENT, 0.18, 0.6);
+        edges(MESH.faceOval, WHITE, 0.6, 1.0);
+        edges(MESH.leftEye, WHITE, 0.5, 0.9);
+        edges(MESH.rightEye, WHITE, 0.5, 0.9);
+        edges(MESH.lips, WHITE, 0.5, 0.9);
+      }
+
+      // DEBUG — landmark registration diagnostic: semantic marks must
+      // sit exactly on the physical features of the captured frame
+      if (debugRef.current) {
+        ctx.font = `${7 * dpr}px monospace`;
+        ctx.textAlign = "left";
+        for (const [idx, name] of REG_MARKS) {
+          const p = lm[idx];
+          if (!p) continue;
+          const [x, y] = px(p);
+          ctx.strokeStyle = "rgba(255, 120, 80, 0.9)";
+          ctx.lineWidth = dpr;
+          ctx.beginPath();
+          ctx.moveTo(x - 3 * dpr, y);
+          ctx.lineTo(x + 3 * dpr, y);
+          ctx.moveTo(x, y - 3 * dpr);
+          ctx.lineTo(x, y + 3 * dpr);
+          ctx.stroke();
+          ctx.fillStyle = "rgba(255, 120, 80, 0.9)";
+          ctx.fillText(name, x + 4 * dpr, y - 3 * dpr);
         }
-        ctx.stroke();
-      };
-      edges(scaffold, ACCENT, 0.18, 0.6);
-      edges(MESH.faceOval, WHITE, 0.6, 1.0);
-      edges(MESH.leftEye, WHITE, 0.5, 0.9);
-      edges(MESH.rightEye, WHITE, 0.5, 0.9);
-      edges(MESH.lips, WHITE, 0.5, 0.9);
+        ctx.fillStyle = "rgba(255, 120, 80, 0.9)";
+        ctx.fillText("LANDMARK REGISTRATION", 6 * dpr, 10 * dpr);
+      }
     };
     raf = requestAnimationFrame(render);
     return () => cancelAnimationFrame(raf);
@@ -122,7 +166,7 @@ export default function OptimalFrame({
       <canvas
         ref={canvasRef}
         className="w-full rounded-sm border border-neutral-800"
-        style={{ aspectRatio: "4 / 4.4" }}
+        style={{ aspectRatio: `${imgAspect}` }}
       />
 
       <div className="mt-3 space-y-1 text-[10px]">

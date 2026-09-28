@@ -274,6 +274,7 @@ export default function AuraVisionApp() {
               frame={frameRef}
               videoRef={videoRef}
               fun={fun}
+              debug={debug}
               onClose={closeResult}
             />
           )}
@@ -282,6 +283,7 @@ export default function AuraVisionApp() {
               result={activeDirector}
               frame={frameRef}
               fun={fun}
+              debug={debug}
               onLive={closeResult}
               onDeepAnalysis={beginAnalysis}
             />

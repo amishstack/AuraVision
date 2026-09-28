@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { MESH, sparseScaffold } from "@/lib/geometry/mesh";
+import { regionMapper } from "@/lib/vision/imageTransform";
 import type { TrackingFrame } from "@/types/vision";
 
 /**
@@ -77,9 +78,14 @@ export default function CameraGeometryBlend({
       // geometry layer (alpha = t)
       const gA = t;
       if (gA > 0.01) {
-        const px = (p: { x: number; y: number }) =>
-          [((f.mirrored ? 1 - p.x : p.x) - sx) / sw * W,
-           (p.y - sy) / sh * H] as const;
+        // canonical registration — mirror within the drawn sub-rect,
+        // matching the flipped drawImage above
+        const px = regionMapper(
+          { x: sx, y: sy, w: sw, h: sh },
+          W,
+          H,
+          f.mirrored,
+        );
         ctx.save();
         ctx.globalAlpha = gA;
         ctx.lineJoin = "round";
