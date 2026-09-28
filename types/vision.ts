@@ -15,6 +15,8 @@ export type TrackingState =
   | "lost"          // face was tracked, recently disappeared
   | "analysis"      // guided Deep Analysis pass
   | "director"      // V6 guided portrait composition
+  | "lab"           // V7 Expression Lab
+  | "duo"           // V8 Aura Duo
   | "complete"      // visual signature / director result screen
   | "error";
 
@@ -227,6 +229,89 @@ export interface DirectorResult {
   } | null;
 }
 
+// ---------------------------------------------------------------------------
+// V7 — Expression Lab
+// ---------------------------------------------------------------------------
+
+/** Per-region normalized geometric displacement vs. neutral baseline. */
+export interface ExpressionVector {
+  brow: number;
+  eyes: number;
+  nose: number;
+  mouth: number;
+  cheeks: number;
+  jaw: number;
+  silhouette: number;
+  overall: number;
+}
+
+export interface LabChallengeResult {
+  id: string;
+  label: string;
+  vector: ExpressionVector;
+}
+
+/** Live UI state pushed by the ExpressionLabEngine each frame. */
+export interface ExpressionLabUI {
+  phase: "baseline" | "prompt" | "capture";
+  instruction: string;
+  challengeLabel: string | null;
+  challengeIndex: number;
+  challengeTotal: number;
+  holdProgress: number;
+  vector: ExpressionVector | null;
+  /** frozen neutral reference — renderer draws baseline→current vectors */
+  baseline: Landmark[] | null;
+}
+
+export interface ExpressionLabResult {
+  challenges: LabChallengeResult[];
+  /** per-region peak response across the session */
+  aggregate: ExpressionVector;
+  /** qualitative, derived from aggregate.overall */
+  responseLabel: string;
+  baseline: Landmark[] | null;
+  lastLandmarks: Landmark[] | null;
+}
+
+// ---------------------------------------------------------------------------
+// V8 — Aura Duo
+// ---------------------------------------------------------------------------
+
+/** A tracked subject in Duo mode — render + synchrony data. */
+export interface DuoSubject {
+  landmarks: Landmark[] | null;
+  boundingBox: BoundingBox | null;
+  cx: number;
+  cy: number;
+  yawDeg: number;
+  gazeDx: number;
+  gazeDy: number;
+  energy: number;
+  present: boolean;
+}
+
+export interface DuoSync {
+  head: number;
+  gaze: number;
+  motion: number;
+  overall: number;
+}
+
+export interface DuoUI {
+  count: number;
+  lockProgress: number;
+  sync: DuoSync | null;
+}
+
+export interface DuoResult {
+  sync: DuoSync;
+  subjects: {
+    landmarks: Landmark[] | null;
+    boundingBox: BoundingBox | null;
+  }[];
+}
+
 /** Mutable per-frame store — written by the tracking loop, read by the
  *  renderer every rAF and by React telemetry at ~10 Hz. */
 export interface TrackingFrame {
@@ -271,6 +356,16 @@ export interface TrackingFrame {
   director: DirectorUI | null;
   /** V6 Director Mode completed result. */
   directorResult: DirectorResult | null;
+  /** V7 Expression Lab UI state while in lab mode. */
+  lab: ExpressionLabUI | null;
+  /** V7 Expression Lab completed result. */
+  labResult: ExpressionLabResult | null;
+  /** V8 Aura Duo UI state while in duo mode. */
+  duo: DuoUI | null;
+  /** V8 Aura Duo tracked subjects A/B for the renderer. */
+  duoSubjects: (DuoSubject | null)[] | null;
+  /** V8 Aura Duo completed result. */
+  duoResult: DuoResult | null;
   /** Latest analysis report (valid in "complete" state). */
   report: AnalysisReport | null;
 }

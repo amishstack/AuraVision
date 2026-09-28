@@ -20,6 +20,8 @@ const STATE_LABEL: Record<TrackingState, string> = {
   lost: "TRACKING LOST",
   analysis: "DEEP ANALYSIS",
   director: "DIRECTOR MODE",
+  lab: "EXPRESSION LAB",
+  duo: "AURA DUO",
   complete: "VISUAL SIGNATURE",
   error: "SYSTEM HALTED",
 };
@@ -78,7 +80,9 @@ export default function SystemInterface({
     snap.state === "locked" ||
     snap.state === "occluded" ||
     snap.state === "analysis" ||
-    snap.state === "director";
+    snap.state === "director" ||
+    snap.state === "lab" ||
+    snap.state === "duo";
 
   const [funIdx, setFunIdx] = useState(0);
   useEffect(() => {

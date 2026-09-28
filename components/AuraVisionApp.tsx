@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { AnalysisReport, DirectorResult as DirectorResultT } from "@/types/vision";
+import type {
+  AnalysisReport,
+  DirectorResult as DirectorResultT,
+  ExpressionLabResult,
+  DuoResult as DuoResultT,
+} from "@/types/vision";
 import { useFaceTracking } from "@/lib/tracking/useFaceTracking";
 import { useTelemetry } from "@/lib/tracking/useTelemetry";
 import CameraFeed from "@/components/camera/CameraFeed";
@@ -11,6 +16,10 @@ import DebugPanel from "@/components/ui/DebugPanel";
 import VisualSignature from "@/components/scan/VisualSignature";
 import DirectorOverlay from "@/components/director/DirectorOverlay";
 import DirectorResult from "@/components/results/DirectorResult";
+import ExpressionLabOverlay from "@/components/lab/ExpressionLabOverlay";
+import DuoOverlay from "@/components/duo/DuoOverlay";
+import ExpressionResult from "@/components/results/ExpressionResult";
+import DuoResult from "@/components/results/DuoResult";
 
 export default function AuraVisionApp() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -20,8 +29,16 @@ export default function AuraVisionApp() {
   // live-view override — reset automatically when a new optimal frame arrives
   const [liveForImage, setLiveForImage] = useState<string | null>(null);
   const [facing, setFacing] = useState<"user" | "environment">("user");
-  const { frameRef, startDeepScan, startDirector, directorSkip, exitProfile } =
-    useFaceTracking(videoRef, session, facing);
+  const {
+    frameRef,
+    startDeepScan,
+    startDirector,
+    directorSkip,
+    startLab,
+    startDuo,
+    duoFinish,
+    exitProfile,
+  } = useFaceTracking(videoRef, session, facing);
   const snap = useTelemetry(frameRef);
 
   useEffect(() => {
@@ -41,8 +58,12 @@ export default function AuraVisionApp() {
   // page is reloaded. Stored on the 'complete' state-transition only.
   const [savedReport, setSavedReport] = useState<AnalysisReport | null>(null);
   const [savedDirector, setSavedDirector] = useState<DirectorResultT | null>(null);
+  const [savedLab, setSavedLab] = useState<ExpressionLabResult | null>(null);
+  const [savedDuo, setSavedDuo] = useState<DuoResultT | null>(null);
   const [viewingSaved, setViewingSaved] = useState(false);
   const [viewingDirector, setViewingDirector] = useState(false);
+  const [viewingLab, setViewingLab] = useState(false);
+  const [viewingDuo, setViewingDuo] = useState(false);
   const [fun, setFun] = useState(false);
   const [funFlash, setFunFlash] = useState(false);
   const [wasComplete, setWasComplete] = useState(false);
@@ -50,14 +71,19 @@ export default function AuraVisionApp() {
     setWasComplete(true);
     if (snap.report) setSavedReport(snap.report);
     if (snap.directorResult) setSavedDirector(snap.directorResult);
+    if (snap.labResult) setSavedLab(snap.labResult);
+    if (snap.duoResult) setSavedDuo(snap.duoResult);
   } else if (snap.state !== "complete" && wasComplete) {
     setWasComplete(false);
   }
 
   const showResult =
-    (snap.state === "complete" && (snap.report || snap.directorResult)) ||
+    (snap.state === "complete" &&
+      (snap.report || snap.directorResult || snap.labResult || snap.duoResult)) ||
     (viewingSaved && savedReport) ||
-    (viewingDirector && savedDirector);
+    (viewingDirector && savedDirector) ||
+    (viewingLab && savedLab) ||
+    (viewingDuo && savedDuo);
   const activeReport =
     snap.state === "complete" && snap.report
       ? snap.report
@@ -70,27 +96,63 @@ export default function AuraVisionApp() {
       : viewingDirector
         ? savedDirector
         : null;
+  const activeLab =
+    snap.state === "complete" && snap.labResult
+      ? snap.labResult
+      : viewingLab
+        ? savedLab
+        : null;
+  const activeDuo =
+    snap.state === "complete" && snap.duoResult
+      ? snap.duoResult
+      : viewingDuo
+        ? savedDuo
+        : null;
   const canViewResult =
     !!savedReport && snap.state !== "complete" && !showResult;
   const canViewPortrait =
     !!savedDirector && snap.state !== "complete" && !showResult;
+  const canViewLab = !!savedLab && snap.state !== "complete" && !showResult;
+  const canViewDuo = !!savedDuo && snap.state !== "complete" && !showResult;
 
   const closeResult = () => {
     setViewingSaved(false);
     setViewingDirector(false);
+    setViewingLab(false);
+    setViewingDuo(false);
     if (snap.state === "complete") exitProfile();
   };
   const beginAnalysis = () => {
     setSavedReport(null);
     setViewingSaved(false);
     setViewingDirector(false);
+    setViewingLab(false);
+    setViewingDuo(false);
     startDeepScan();
   };
   const beginDirector = () => {
     setSavedDirector(null);
     setViewingSaved(false);
     setViewingDirector(false);
+    setViewingLab(false);
+    setViewingDuo(false);
     startDirector();
+  };
+  const beginLab = () => {
+    setSavedLab(null);
+    setViewingSaved(false);
+    setViewingDirector(false);
+    setViewingLab(false);
+    setViewingDuo(false);
+    startLab();
+  };
+  const beginDuo = () => {
+    setSavedDuo(null);
+    setViewingSaved(false);
+    setViewingDirector(false);
+    setViewingLab(false);
+    setViewingDuo(false);
+    startDuo();
   };
 
   const isError = snap.state === "error";
@@ -109,7 +171,7 @@ export default function AuraVisionApp() {
             VISUAL PRESENCE LAB
           </div>
         </div>
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-4">
           <span className="hidden font-mono text-[10px] tracking-[0.2em] text-neutral-600 sm:inline">
             LOCAL PROCESSING — NO UPLOAD
           </span>
@@ -117,30 +179,50 @@ export default function AuraVisionApp() {
             <>
               <button
                 onClick={beginAnalysis}
-                className={`font-mono font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 ${
+                className={`font-mono text-[9px] font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 sm:text-[11px] ${
                   demo
-                    ? "rounded border border-neutral-600 px-4 py-2 text-[11px] text-neutral-100"
-                    : "text-[11px] text-neutral-200"
+                    ? "rounded border border-neutral-600 px-3 py-2 text-neutral-100"
+                    : "text-neutral-200"
                 }`}
               >
                 DEEP ANALYSIS
               </button>
               <button
                 onClick={beginDirector}
-                className={`font-mono font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 ${
+                className={`font-mono text-[9px] font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 sm:text-[11px] ${
                   demo
-                    ? "rounded border border-neutral-600 px-4 py-2 text-[11px] text-neutral-100"
-                    : "text-[11px] text-neutral-200"
+                    ? "rounded border border-neutral-600 px-3 py-2 text-neutral-100"
+                    : "text-neutral-200"
                 }`}
               >
                 DIRECTOR
+              </button>
+              <button
+                onClick={beginLab}
+                className={`font-mono text-[9px] font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 sm:text-[11px] ${
+                  demo
+                    ? "rounded border border-neutral-600 px-3 py-2 text-neutral-100"
+                    : "text-neutral-200"
+                }`}
+              >
+                LAB
+              </button>
+              <button
+                onClick={beginDuo}
+                className={`font-mono text-[9px] font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 sm:text-[11px] ${
+                  demo
+                    ? "rounded border border-neutral-600 px-3 py-2 text-neutral-100"
+                    : "text-neutral-200"
+                }`}
+              >
+                DUO
               </button>
             </>
           )}
           {canViewResult && (
             <button
               onClick={() => setViewingSaved(true)}
-              className="font-mono text-[10px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200"
+              className="font-mono text-[9px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200 sm:text-[10px]"
             >
               RESULT
             </button>
@@ -148,9 +230,25 @@ export default function AuraVisionApp() {
           {canViewPortrait && (
             <button
               onClick={() => setViewingDirector(true)}
-              className="font-mono text-[10px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200"
+              className="font-mono text-[9px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200 sm:text-[10px]"
             >
               PORTRAIT
+            </button>
+          )}
+          {canViewLab && (
+            <button
+              onClick={() => setViewingLab(true)}
+              className="font-mono text-[9px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200 sm:text-[10px]"
+            >
+              LAB R
+            </button>
+          )}
+          {canViewDuo && (
+            <button
+              onClick={() => setViewingDuo(true)}
+              className="font-mono text-[9px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200 sm:text-[10px]"
+            >
+              DUO R
             </button>
           )}
           {!demo && (
@@ -235,6 +333,27 @@ export default function AuraVisionApp() {
           {/* director HUD */}
           <DirectorOverlay snap={snap} fun={fun} onSkip={directorSkip} />
 
+          {/* expression lab — vectors + challenges (V7) */}
+          <ExpressionLabOverlay
+            frame={frameRef}
+            videoRef={videoRef}
+            snap={snap}
+            debug={debug}
+            fun={fun}
+            onExit={exitProfile}
+          />
+
+          {/* aura duo — two-subject field (V8) */}
+          <DuoOverlay
+            frame={frameRef}
+            videoRef={videoRef}
+            snap={snap}
+            debug={debug}
+            fun={fun}
+            onFinish={duoFinish}
+            onExit={exitProfile}
+          />
+
           {/* optimal-frame freeze — the actual captured candidate */}
           {snap.state === "analysis" && snap.optimalFrame && (
             <div className="absolute inset-0 animate-[fadeIn_0.4s_ease-out]">
@@ -305,6 +424,30 @@ export default function AuraVisionApp() {
               onDeepAnalysis={beginAnalysis}
             />
           )}
+          {showResult &&
+            activeLab &&
+            !activeDirector &&
+            !activeReport &&
+            !activeDuo && (
+              <ExpressionResult
+                result={activeLab}
+                fun={fun}
+                onLive={closeResult}
+                onRestart={beginLab}
+              />
+            )}
+          {showResult &&
+            activeDuo &&
+            !activeDirector &&
+            !activeReport &&
+            !activeLab && (
+              <DuoResult
+                result={activeDuo}
+                fun={fun}
+                onLive={closeResult}
+                onRestart={beginDuo}
+              />
+            )}
 
           {/* error veil */}
           {isError && (

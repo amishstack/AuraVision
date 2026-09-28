@@ -10,6 +10,9 @@ import { LightingAnalyzer } from "@/lib/lighting/lighting";
 import { DeepAnalysisRunner } from "@/lib/analysis/runner";
 import { BestFrameEngine, toBestFrameResult } from "@/lib/bestFrame/bestFrame";
 import { DirectorEngine } from "@/lib/director/director";
+import { ExpressionLabEngine } from "@/lib/expression/lab";
+import { DuoTracker } from "@/lib/duo/duoTracking";
+import { DuoSynchrony } from "@/lib/duo/duoSynchrony";
 import { estimateGaze } from "@/lib/gaze/gaze";
 import { measureDynamics, type BlendshapeSignals } from "@/lib/dynamics/dynamics";
 import { computeDepthField } from "@/lib/depth/depth";
@@ -58,6 +61,11 @@ export function createInitialFrame(): TrackingFrame {
     optimalFrame: null,
     director: null,
     directorResult: null,
+    lab: null,
+    labResult: null,
+    duo: null,
+    duoSubjects: null,
+    duoResult: null,
     report: null,
   };
 }
@@ -91,6 +99,12 @@ export interface TrackingControls {
   startDirector: () => void;
   /** Gracefully finish Director Mode with the best available frame. */
   directorSkip: () => void;
+  /** V7 — start Expression Lab (baseline → challenges → result). */
+  startLab: () => void;
+  /** V8 — start Aura Duo (two-subject synchronized visualization). */
+  startDuo: () => void;
+  /** Gracefully finish Duo, keeping the current synchrony snapshot. */
+  duoFinish: () => void;
   /** Leave the visual-profile screen, back to live tracking. */
   exitProfile: () => void;
 }
@@ -105,6 +119,9 @@ export function useFaceTracking(
   const profileExit = useRef(false);
   const directorRequested = useRef(false);
   const directorSkip = useRef(false);
+  const labRequested = useRef(false);
+  const duoRequested = useRef(false);
+  const duoFinish = useRef(false);
 
   useEffect(() => {
     Object.assign(frameRef.current, createInitialFrame());
@@ -118,7 +135,12 @@ export function useFaceTracking(
     const analysis = new DeepAnalysisRunner();
     const bestFrames = new BestFrameEngine();
     const director = new DirectorEngine();
+    const lab = new ExpressionLabEngine();
+    const duoTracker = new DuoTracker();
+    const duoSync = new DuoSynchrony();
     let secondFaceCx: number | null = null;
+    let duoLockSince = 0;
+    let rawFaces: Landmark[][] = [];
 
     // gaze temporal smoothing + label hysteresis
     let gazeDx = 0, gazeDy = 0, gazeConf = 0;
@@ -320,10 +342,113 @@ export function useFaceTracking(
           } else {
             frame.director = null;
           }
+          // --- expression lab lifecycle (V7) ---------------------------
+          if (labRequested.current) {
+            labRequested.current = false;
+            if (frame.state === "tracking" || frame.state === "locked") {
+              lab.begin(now);
+              frame.report = null;
+              frame.directorResult = null;
+              frame.labResult = null;
+              frame.duoResult = null;
+              setState("lab", now);
+            }
+          }
+          if (frame.state === "lab") {
+            lab.update(
+              {
+                facePresent: frame.landmarks !== null,
+                landmarks: frame.landmarks,
+                dynamics: frame.dynamics,
+                gaze: frame.gaze,
+                pose: frame.pose,
+                stability: frame.metrics.stability,
+              },
+              now,
+            );
+            frame.lab = lab.ui(now);
+            if (lab.isDone()) {
+              frame.labResult = lab.finish();
+              frame.lab = null;
+              setState("complete", now);
+            }
+          } else {
+            frame.lab = null;
+          }
+          // --- aura duo lifecycle (V8) ---------------------------------
+          if (duoRequested.current) {
+            duoRequested.current = false;
+            if (
+              frame.state === "tracking" ||
+              frame.state === "locked" ||
+              frame.state === "searching"
+            ) {
+              duoTracker.reset();
+              duoSync.reset();
+              duoLockSince = 0;
+              frame.report = null;
+              frame.directorResult = null;
+              frame.labResult = null;
+              frame.duoResult = null;
+              setState("duo", now);
+            }
+          }
+          if (frame.state === "duo") {
+            frame.duoSubjects = duoTracker.update(
+              rawFaces.map((lm) => ({ landmarks: lm })),
+              frame.mirrored,
+              now,
+            );
+            const [subA, subB] = frame.duoSubjects;
+            const count =
+              (subA?.present ? 1 : 0) + (subB?.present ? 1 : 0);
+            duoSync.push(subA ?? null, subB ?? null, now);
+            const sync = duoSync.sync();
+            const bothCalm =
+              count === 2 &&
+              (subA?.energy ?? 1) < 0.3 &&
+              (subB?.energy ?? 1) < 0.3;
+            if (bothCalm) {
+              if (!duoLockSince) duoLockSince = now;
+            } else duoLockSince = 0;
+            const lockProgress = duoLockSince
+              ? Math.min(1, (now - duoLockSince) / 1000)
+              : 0;
+            frame.duo = { count, lockProgress, sync };
+            const done =
+              lockProgress >= 1 || (duoFinish.current && count === 2);
+            duoFinish.current = false;
+            if (done) {
+              frame.duoResult = {
+                sync: sync ?? {
+                  head: 0,
+                  gaze: 0,
+                  motion: 0,
+                  overall: 0,
+                },
+                subjects: [subA, subB].map((s) => ({
+                  landmarks: s?.landmarks ?? null,
+                  boundingBox: s?.boundingBox ?? null,
+                })),
+              };
+              frame.duo = null;
+              frame.duoSubjects = null;
+              setState("complete", now);
+            }
+          } else {
+            frame.duo = null;
+            frame.duoSubjects = null;
+            duoFinish.current = false;
+          }
           if (profileExit.current) {
             profileExit.current = false;
             frame.report = null;
             frame.directorResult = null;
+            frame.labResult = null;
+            frame.duoResult = null;
+            frame.lab = null;
+            frame.duo = null;
+            frame.duoSubjects = null;
             setState(
               frame.landmarks ? "tracking" : "searching",
               now,
@@ -349,19 +474,27 @@ export function useFaceTracking(
       frame.metrics.confidence = presenceEma;
 
       if (count === 0) {
+        rawFaces = [];
         lostFrames++;
         frame.framesWithFace = 0;
         if (lostFrames > 6) {
           // Was tracked → brief LOST state, then back to searching.
           // COMPLETE (profile screen) and ERROR persist regardless.
+          // LAB/DUO manage absence internally — subjects may leave and
+          // re-enter without abandoning the mode.
           const wasTracking =
             frame.state === "tracking" ||
             frame.state === "locked" ||
             frame.state === "occluded" ||
             frame.state === "analysis" ||
             frame.state === "director";
-          if (frame.state === "complete" || frame.state === "error") {
-            // leave the profile / error state untouched
+          if (
+            frame.state === "complete" ||
+            frame.state === "error" ||
+            frame.state === "lab" ||
+            frame.state === "duo"
+          ) {
+            // leave the profile / interactive-mode state untouched
           } else if (frame.state !== "searching" && frame.state !== "lost") {
             setState(wasTracking ? "lost" : "searching", performance.now());
           }
@@ -403,6 +536,7 @@ export function useFaceTracking(
         }
       }
 
+      rawFaces = (result.faceLandmarks ?? []) as Landmark[][];
       const raw = result.faceLandmarks[best] as Landmark[];
       rawCache = raw;
       frame.rawLandmarks = raw;
@@ -515,6 +649,8 @@ export function useFaceTracking(
           break;
         case "analysis":
         case "director":
+        case "lab":
+        case "duo":
           // handled in the rAF loop; keep scanning even if degraded
           break;
         default:
@@ -542,6 +678,15 @@ export function useFaceTracking(
     },
     directorSkip: () => {
       directorSkip.current = true;
+    },
+    startLab: () => {
+      labRequested.current = true;
+    },
+    startDuo: () => {
+      duoRequested.current = true;
+    },
+    duoFinish: () => {
+      duoFinish.current = true;
     },
     exitProfile: () => {
       profileExit.current = true;
