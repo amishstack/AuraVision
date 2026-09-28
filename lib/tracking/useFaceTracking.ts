@@ -343,16 +343,17 @@ export function useFaceTracking(
             frame.director = null;
           }
           // --- expression lab lifecycle (V7) ---------------------------
-          if (labRequested.current) {
+          if (
+            labRequested.current &&
+            (frame.state === "tracking" || frame.state === "locked")
+          ) {
             labRequested.current = false;
-            if (frame.state === "tracking" || frame.state === "locked") {
-              lab.begin(now);
-              frame.report = null;
-              frame.directorResult = null;
-              frame.labResult = null;
-              frame.duoResult = null;
-              setState("lab", now);
-            }
+            lab.begin(now);
+            frame.report = null;
+            frame.directorResult = null;
+            frame.labResult = null;
+            frame.duoResult = null;
+            setState("lab", now);
           }
           if (frame.state === "lab") {
             lab.update(
@@ -376,22 +377,21 @@ export function useFaceTracking(
             frame.lab = null;
           }
           // --- aura duo lifecycle (V8) ---------------------------------
-          if (duoRequested.current) {
-            duoRequested.current = false;
-            if (
-              frame.state === "tracking" ||
+          if (
+            duoRequested.current &&
+            (frame.state === "tracking" ||
               frame.state === "locked" ||
-              frame.state === "searching"
-            ) {
-              duoTracker.reset();
-              duoSync.reset();
-              duoLockSince = 0;
-              frame.report = null;
-              frame.directorResult = null;
-              frame.labResult = null;
-              frame.duoResult = null;
-              setState("duo", now);
-            }
+              frame.state === "searching")
+          ) {
+            duoRequested.current = false;
+            duoTracker.reset();
+            duoSync.reset();
+            duoLockSince = 0;
+            frame.report = null;
+            frame.directorResult = null;
+            frame.labResult = null;
+            frame.duoResult = null;
+            setState("duo", now);
           }
           if (frame.state === "duo") {
             frame.duoSubjects = duoTracker.update(

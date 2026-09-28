@@ -154,6 +154,20 @@ export default function AuraVisionApp() {
     setViewingDuo(false);
     startDuo();
   };
+  // REPLAY: leave the result screen first — the start request stays
+  // pending in the tracker until tracking resumes.
+  const replayLab = () => {
+    setSavedLab(null);
+    setViewingLab(false);
+    if (snap.state === "complete") exitProfile();
+    startLab();
+  };
+  const replayDuo = () => {
+    setSavedDuo(null);
+    setViewingDuo(false);
+    if (snap.state === "complete") exitProfile();
+    startDuo();
+  };
 
   const isError = snap.state === "error";
   const mirrored = facing === "user";
@@ -433,7 +447,7 @@ export default function AuraVisionApp() {
                 result={activeLab}
                 fun={fun}
                 onLive={closeResult}
-                onRestart={beginLab}
+                onRestart={replayLab}
               />
             )}
           {showResult &&
@@ -445,7 +459,7 @@ export default function AuraVisionApp() {
                 result={activeDuo}
                 fun={fun}
                 onLive={closeResult}
-                onRestart={beginDuo}
+                onRestart={replayDuo}
               />
             )}
 

@@ -80,7 +80,13 @@ export default function ExpressionResult({
   onRestart: () => void;
 }) {
   const [blend, setBlend] = useState(1); // 0 = baseline, 1 = current
+  const [barsOn, setBarsOn] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setBarsOn(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -116,7 +122,7 @@ export default function ExpressionResult({
           EXPRESSION CAPTURED
         </h1>
         <div className="mt-1 text-[9px] tracking-[0.25em] text-cyan-200/80">
-          {result.responseLabel}
+          DYNAMIC PROFILE
         </div>
 
         {/* before / after ghost compare */}
@@ -152,8 +158,8 @@ export default function ExpressionResult({
               <span className="w-14 text-[9px] text-neutral-400">{name}</span>
               <div className="h-1 flex-1 bg-neutral-800">
                 <div
-                  className="h-1 bg-cyan-300/80"
-                  style={{ width: `${Math.round(v * 100)}%` }}
+                  className="h-1 bg-cyan-300/80 transition-[width] duration-700 ease-out"
+                  style={{ width: `${barsOn ? Math.round(v * 100) : 0}%` }}
                 />
               </div>
               <span className="w-8 text-right text-[9px] text-neutral-400">
@@ -165,8 +171,8 @@ export default function ExpressionResult({
             <span className="w-14 text-[9px] text-neutral-300">DYNAMIC</span>
             <div className="h-1 flex-1 bg-neutral-800">
               <div
-                className="h-1 bg-cyan-300"
-                style={{ width: `${Math.round(a.overall * 100)}%` }}
+                className="h-1 bg-cyan-300 transition-[width] duration-700 ease-out"
+                style={{ width: `${barsOn ? Math.round(a.overall * 100) : 0}%` }}
               />
             </div>
             <span className="w-8 text-right text-[9px] text-neutral-200">
@@ -176,6 +182,9 @@ export default function ExpressionResult({
           <div className="mt-2 text-[7px] tracking-[0.2em] text-neutral-600">
             {result.challenges.length} CHALLENGES · LOCAL SESSION ANALYSIS
           </div>
+          <div className="mt-0.5 text-[7px] tracking-[0.2em] text-neutral-600">
+            GEOMETRIC MOTION · MEASURED FROM BASELINE DISPLACEMENT
+          </div>
         </div>
 
         <div className="mt-6 flex gap-3">
@@ -183,7 +192,7 @@ export default function ExpressionResult({
             onClick={onRestart}
             className="rounded border border-white/20 px-4 py-2 text-[9px] tracking-[0.25em] text-neutral-300 transition hover:border-cyan-300/50 hover:text-cyan-200"
           >
-            NEXT CHALLENGE
+            REPLAY LAB
           </button>
           <button
             onClick={onLive}

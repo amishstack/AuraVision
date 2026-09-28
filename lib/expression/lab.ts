@@ -83,6 +83,23 @@ type Phase = "idle" | "baseline" | "prompt" | "capture" | "done";
 const cloneLm = (lm: Landmark[] | null): Landmark[] | null =>
   lm ? lm.map((p) => ({ ...p })) : null;
 
+const ZERO_VEC: ExpressionVector = {
+  brow: 0, eyes: 0, nose: 0, mouth: 0,
+  cheeks: 0, jaw: 0, silhouette: 0, overall: 0,
+};
+
+/** element-wise mean of sampled vectors — robust hold-window estimate */
+function meanVector(list: ExpressionVector[]): ExpressionVector {
+  if (!list.length) return { ...ZERO_VEC };
+  const out = { ...ZERO_VEC };
+  for (const v of list) {
+    (Object.keys(out) as (keyof ExpressionVector)[]).forEach(
+      (k) => (out[k] += v[k] / list.length),
+    );
+  }
+  return out;
+}
+
 export class ExpressionLabEngine {
   private phase: Phase = "idle";
   private baseline: Landmark[] | null = null;
@@ -93,6 +110,10 @@ export class ExpressionLabEngine {
   private results: { id: string; label: string; vector: ExpressionVector }[] = [];
   private lastLm: Landmark[] | null = null;
   private liveVector: ExpressionVector | null = null;
+  /** vectors sampled while the challenge criterion is held */
+  private holdVecs: ExpressionVector[] = [];
+  /** peak displacement seen during the prompt (timeout fallback) */
+  private peakVec: ExpressionVector | null = null;
 
   begin(now: number): void {
     this.phase = "baseline";
@@ -104,6 +125,8 @@ export class ExpressionLabEngine {
     this.results = [];
     this.lastLm = null;
     this.liveVector = null;
+    this.holdVecs = [];
+    this.peakVec = null;
   }
 
   isDone(): boolean {
@@ -149,6 +172,17 @@ export class ExpressionLabEngine {
         this.phase = "done";
         return;
       }
+      // track the largest displacement seen during the prompt window —
+      // used as the measured magnitude if the challenge times out
+      if (this.liveVector) {
+        if (!this.peakVec) this.peakVec = this.liveVector;
+        else {
+          for (const k of Object.keys(this.peakVec) as (keyof ExpressionVector)[]) {
+            if (this.liveVector[k] > this.peakVec[k])
+              this.peakVec[k] = this.liveVector[k];
+          }
+        }
+      }
       const hit = this.baselineDyn
         ? ch.test(
             this.baselineDyn,
@@ -160,39 +194,39 @@ export class ExpressionLabEngine {
         : false;
       if (hit) {
         if (!this.holdStart) this.holdStart = now;
+        if (this.liveVector) this.holdVecs.push(this.liveVector);
         if (now - this.holdStart >= DETECT_MS) {
+          // magnitude = mean displacement over the held window — the
+          // challenge being detected does NOT imply 100% motion
           this.results.push({
             id: ch.id,
             label: ch.label,
-            vector:
-              this.liveVector ??
-              expressionVector(this.baseline, input.landmarks) ??
-              ({
-                brow: 0, eyes: 0, nose: 0, mouth: 0,
-                cheeks: 0, jaw: 0, silhouette: 0, overall: 0,
-              } as ExpressionVector),
+            vector: this.holdVecs.length
+              ? meanVector(this.holdVecs)
+              : (this.peakVec ?? this.liveVector ?? { ...ZERO_VEC }),
           });
           this.lastLm = cloneLm(input.landmarks);
           this.phase = "capture";
           this.phaseStart = now;
           this.holdStart = 0;
+          this.holdVecs = [];
+          this.peakVec = null;
         }
       } else {
         this.holdStart = 0;
+        this.holdVecs = [];
         // timeout → record whatever the field shows and move on
         if (now - this.phaseStart >= TIMEOUT_MS) {
           this.results.push({
             id: ch.id,
             label: ch.label,
-            vector:
-              this.liveVector ?? ({
-                brow: 0, eyes: 0, nose: 0, mouth: 0,
-                cheeks: 0, jaw: 0, silhouette: 0, overall: 0,
-              } as ExpressionVector),
+            vector: this.peakVec ?? this.liveVector ?? { ...ZERO_VEC },
           });
           this.lastLm = cloneLm(input.landmarks);
           this.phase = "capture";
           this.phaseStart = now;
+          this.holdVecs = [];
+          this.peakVec = null;
         }
       }
       return;

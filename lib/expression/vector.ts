@@ -46,34 +46,36 @@ export const REGION_ORDER: ExpressionRegion[] = [
 const FOREHEAD = 10;
 const CHIN = 152;
 
-// ~6% of face height of mean regional displacement saturates the region —
-// a strong expression moves feature landmarks well past this.
-const SATURATION = 0.06;
+// A region saturates when its deformation (above ambient head motion)
+// reaches ~12% of face height — an exaggerated expression. Ordinary
+// successful movements land at 20–80%, not 100.
+const SATURATION = 0.12;
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
-function regionDisplacement(
-  base: Landmark[],
-  cur: Landmark[],
-  idx: readonly number[],
-  scale: number,
-): number {
-  let sum = 0;
-  let n = 0;
-  for (const i of idx) {
-    const a = base[i];
-    const b = cur[i];
-    if (!a || !b) continue;
-    sum += Math.hypot(b.x - a.x, b.y - a.y);
-    n++;
+function centroid(lm: Landmark[]): [number, number] {
+  let x = 0, y = 0;
+  for (const p of lm) {
+    x += p.x;
+    y += p.y;
   }
-  return n ? clamp01(sum / n / (scale * SATURATION)) : 0;
+  return [x / lm.length, y / lm.length];
 }
 
 /**
  * Normalized displacement vector between two landmark fields (both in
- * normalized landmark space). Region weights: features dominate the
- * overall score; silhouette/jaw are context.
+ * normalized landmark space).
+ *
+ * Two biases are removed before scoring so a completed challenge does
+ * not auto-saturate:
+ *   1. whole-head translation — centroids are aligned so pure drift
+ *      produces zero regional motion (rotation still registers)
+ *   2. ambient floor — the median per-landmark displacement (residual
+ *      rigid/tracking noise shared across the face) is discounted from
+ *      every region, so bars reflect motion ABOVE background
+ *
+ * Region weights: features dominate the overall score; silhouette/jaw
+ * are context.
  */
 export function expressionVector(
   baseline: Landmark[] | null,
@@ -87,14 +89,46 @@ export function expressionVector(
   );
   if (scale < 1e-5) return null;
 
+  // remove whole-head translation
+  const [bx, by] = centroid(baseline);
+  const [cx, cy] = centroid(current);
+  const tx = cx - bx;
+  const ty = cy - by;
+
+  const dispAt = (i: number) => {
+    const a = baseline[i];
+    const b = current[i];
+    return Math.hypot(b.x - tx - a.x, b.y - ty - a.y);
+  };
+
+  // ambient floor — median displacement across a strided probe set
+  const probes: number[] = [];
+  for (let i = 0; i < baseline.length; i += 16) probes.push(dispAt(i));
+  probes.sort((p, q) => p - q);
+  const floor = probes[Math.floor(probes.length / 2)] ?? 0;
+
+  const region = (idx: readonly number[]): number => {
+    let sum = 0;
+    let n = 0;
+    for (const i of idx) {
+      if (i < baseline.length) {
+        sum += dispAt(i);
+        n++;
+      }
+    }
+    const mean = n ? sum / n : 0;
+    // discount 60% of ambient motion; saturate at 12% of face height
+    return clamp01(Math.max(0, mean - floor * 0.6) / (scale * SATURATION));
+  };
+
   const v: Record<ExpressionRegion, number> = {
-    brow: regionDisplacement(baseline, current, REGION_IDX.brow, scale),
-    eyes: regionDisplacement(baseline, current, REGION_IDX.eyes, scale),
-    nose: regionDisplacement(baseline, current, REGION_IDX.nose, scale),
-    mouth: regionDisplacement(baseline, current, REGION_IDX.mouth, scale),
-    cheeks: regionDisplacement(baseline, current, REGION_IDX.cheeks, scale),
-    jaw: regionDisplacement(baseline, current, REGION_IDX.jaw, scale),
-    silhouette: regionDisplacement(baseline, current, REGION_IDX.silhouette, scale),
+    brow: region(REGION_IDX.brow),
+    eyes: region(REGION_IDX.eyes),
+    nose: region(REGION_IDX.nose),
+    mouth: region(REGION_IDX.mouth),
+    cheeks: region(REGION_IDX.cheeks),
+    jaw: region(REGION_IDX.jaw),
+    silhouette: region(REGION_IDX.silhouette),
   };
 
   const overall =
