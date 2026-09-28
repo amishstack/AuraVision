@@ -104,6 +104,9 @@ function funCopy(instruction: string, phase: string): string {
   if (instruction === "RELAX YOUR FACE") return "EASY DOES IT.";
   if (instruction === "EXPRESSION — SET") return "LOVE THAT.";
   if (instruction === "EXPRESSION — NATURAL") return "NATURAL WORKS.";
+  if (instruction === "MOVE TOWARD LIGHT") return "CHASE THE LIGHT.";
+  if (instruction === "CENTER YOUR FACE") return "DEAD CENTER.";
+  if (instruction.startsWith("TURN SLIGHTLY")) return "THAT'S THE ANGLE.";
   if (instruction === "ACQUIRING FACE") return "SCANNING…";
   return "WORKING THE ANGLE.";
 }

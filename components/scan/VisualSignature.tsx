@@ -95,6 +95,7 @@ export default function VisualSignature({
               }
               size={300}
               fun={fun}
+              debug={debug}
             />
           </div>
           <div className="mt-2 text-center text-[9px] leading-4 tracking-[0.25em] text-neutral-500">

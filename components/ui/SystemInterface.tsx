@@ -109,14 +109,15 @@ export default function SystemInterface({
               : STATE_LABEL[snap.state]}
           </span>
           {fun && (
-            <span className="text-[8px] tracking-[0.2em] text-cyan-300">
-              FUN
+            <span className="flex items-center gap-1 text-[8px] tracking-[0.2em] text-cyan-300">
+              <span className="inline-block h-1 w-1 animate-pulse rounded-full bg-cyan-300" />
+              FUN MODE
             </span>
           )}
         </div>
         {fun && (
           <div className="mt-0.5 text-[8px] tracking-[0.2em] text-cyan-200/70">
-            {hasFace ? FUN_LINES[funIdx % FUN_LINES.length] : "FUN MODE — ACTIVE"}
+            {hasFace ? FUN_LINES[funIdx % FUN_LINES.length] : "ACTIVE"}
           </div>
         )}
       </div>

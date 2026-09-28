@@ -213,10 +213,12 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
         }
       };
 
-      // FUN mode: subtle breathing shimmer on geometry intensity
-      const funAmp = funRef.current
+      // FUN mode: breathing shimmer + cyan feature treatment
+      const isFun = funRef.current;
+      const funAmp = isFun
         ? 1 + 0.26 * Math.sin(performance.now() * 0.0022)
         : 1;
+      const featCol = isFun ? ACCENT : WHITE;
 
       // --- L4 interior scaffold (depth field) ---------------------------
       drawScaffold((0.10 + 0.16 * lock) * e * sMesh * funAmp, 0.6);
@@ -226,9 +228,9 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
 
       // --- L2 features ---------------------------------------------------
       const featA = (0.34 + 0.30 * lock) * e * sFeat * funAmp;
-      drawEdges(MESH.leftEye, WHITE, featA, 1.0);
-      drawEdges(MESH.rightEye, WHITE, featA, 1.0);
-      drawEdges(MESH.lips, WHITE, featA, 1.0);
+      drawEdges(MESH.leftEye, featCol, featA, 1.0);
+      drawEdges(MESH.rightEye, featCol, featA, 1.0);
+      drawEdges(MESH.lips, featCol, featA, 1.0);
       drawEdges(MESH.leftBrow, ACCENT, featA * 0.8, 0.9);
       drawEdges(MESH.rightBrow, ACCENT, featA * 0.8, 0.9);
       if (!f.occluded) {
@@ -260,6 +262,31 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
       if (funRef.current && e > 0.3) {
         const t = performance.now() * 0.001;
         const burstBoost = 1 + (1 - burstT); // denser/brighter during burst
+
+        // traveling pulse through the mesh — scaffold subset brightens
+        // on a radial wave from the face center (~2.5s cycle)
+        if (f.boundingBox) {
+          const bb = f.boundingBox;
+          const [fcx, fcy] = px({ x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 });
+          ctx.strokeStyle = `rgba(${ACCENT}, 0.14)`;
+          ctx.lineWidth = 0.7 * dpr;
+          ctx.beginPath();
+          for (let i = 0; i < scaffold.length; i += 3) {
+            const ed = scaffold[i];
+            const A = lm[ed.start], B = lm[ed.end];
+            if (!A || !B) continue;
+            const [ax, ay] = px(A);
+            const [bx, by] = px(B);
+            const d = Math.hypot((ax + bx) / 2 - fcx, (ay + by) / 2 - fcy);
+            const wave = Math.sin(t * 2.4 - d * 0.006);
+            if (wave < 0.55) continue;
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(bx, by);
+          }
+          ctx.stroke();
+        }
+
+        // landmark twinkle
         for (let i = 0; i < lm.length; i += burstT < 1 ? 12 : 24) {
           const tw = 0.5 + 0.5 * Math.sin(t * 2.4 + i * 1.7);
           if (tw < 0.55) continue;
@@ -267,12 +294,14 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
           ctx.fillStyle = `rgba(${ACCENT}, ${Math.min(1, 0.4 * tw * e * burstBoost)})`;
           ctx.fillRect(x - dpr, y - dpr, 2 * dpr, 2 * dpr);
         }
+
         if (f.boundingBox) {
           const bb = f.boundingBox;
           const [bcx, bcy] = px({ x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 });
           const rBase = Math.max(bb.w * dispW, bb.h * dispH);
+
           // activation signature: one cyan ring expands once around the
-          // face and fades; ambient arc keeps sweeping while FUN is on
+          // face and fades; ambient ring + sweep + particles while on
           if (burstT < 1) {
             const rb = rBase * (0.35 + 1.15 * burstT);
             ctx.strokeStyle = `rgba(${ACCENT}, ${(1 - burstT) * 0.55 * e})`;
@@ -281,13 +310,45 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
             ctx.arc(bcx, bcy, rb, 0, Math.PI * 2);
             ctx.stroke();
           }
+
+          // faint persistent orbit ring + slow sweep arc (~5s rotation)
           const r = rBase * 0.62;
-          const a0 = t * 0.9;
-          ctx.strokeStyle = `rgba(${ACCENT}, ${0.3 * e})`;
+          ctx.strokeStyle = `rgba(${ACCENT}, ${0.07 * e})`;
           ctx.lineWidth = dpr;
+          ctx.beginPath();
+          ctx.arc(bcx, bcy, r, 0, Math.PI * 2);
+          ctx.stroke();
+          const a0 = t * 1.15;
+          ctx.strokeStyle = `rgba(${ACCENT}, ${0.34 * e})`;
           ctx.beginPath();
           ctx.arc(bcx, bcy, r, a0, a0 + 0.9);
           ctx.stroke();
+
+          // sparse particles drifting on the ring
+          for (let i = 0; i < 10; i++) {
+            const pa = t * 0.32 + i * 0.63;
+            const pr = r * (0.92 + 0.16 * Math.sin(i * 1.9 + t * 0.5));
+            const pxp = bcx + Math.cos(pa) * pr;
+            const pyp = bcy + Math.sin(pa) * pr * 0.88;
+            const pa2 = 0.14 + 0.12 * Math.sin(t * 1.6 + i * 2.3);
+            ctx.fillStyle = `rgba(${ACCENT}, ${Math.max(0.02, pa2) * e})`;
+            ctx.fillRect(pxp - dpr * 0.8, pyp - dpr * 0.8, 1.6 * dpr, 1.6 * dpr);
+          }
+
+          // periodic vertical sweep band across the face (~4.5s period)
+          const sp = (t % 4.5) / 4.5;
+          const [bxA] = px({ x: bb.x, y: 0 });
+          const [bxB] = px({ x: bb.x + bb.w, y: 0 });
+          const bx0 = Math.min(bxA, bxB); // displayed left edge (mirror-safe)
+          const swpX = bx0 + sp * bb.w * dispW;
+          const [, bcyTop] = px({ x: 0, y: bb.y });
+          const bh = bb.h * dispH;
+          const grad = ctx.createLinearGradient(swpX - 14 * dpr, 0, swpX + 14 * dpr, 0);
+          grad.addColorStop(0, `rgba(${ACCENT}, 0)`);
+          grad.addColorStop(0.5, `rgba(${ACCENT}, ${0.10 * e})`);
+          grad.addColorStop(1, `rgba(${ACCENT}, 0)`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(swpX - 14 * dpr, bcyTop, 28 * dpr, bh);
         }
       }
 

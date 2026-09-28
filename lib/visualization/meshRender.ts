@@ -142,10 +142,13 @@ export function drawSignatureMesh(
   ctx: CanvasRenderingContext2D,
   proj: Projection,
   dpr: number,
+  /** optional 0..1 glow — FUN mode sweeps feature brightness with it */
+  glow = 0,
 ): void {
   const { sx, sy, sz, n } = proj;
   const w = regionWeights();
   const scaffold = sparseScaffold(8);
+  const featBoost = 1 + glow * 0.5;
 
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
@@ -157,17 +160,17 @@ export function drawSignatureMesh(
   drawEdges(ctx, proj, MESH.contours, ACCENT, 0.22, dpr * 0.8);
 
   // nose structure — strongest mid-face cue, kept readable while orbiting
-  drawPolyline(ctx, proj, NOSE_RIDGE, WHITE, 0.62, dpr * 1.0);
-  drawPolyline(ctx, proj, NOSE_BASE, WHITE, 0.5, dpr * 0.9);
+  drawPolyline(ctx, proj, NOSE_RIDGE, WHITE, 0.62 * featBoost, dpr * 1.0);
+  drawPolyline(ctx, proj, NOSE_BASE, WHITE, 0.5 * featBoost, dpr * 0.9);
 
   // features — eyes, brows, iris, lips
-  drawEdges(ctx, proj, MESH.leftBrow, WHITE, 0.6, dpr * 0.95);
-  drawEdges(ctx, proj, MESH.rightBrow, WHITE, 0.6, dpr * 0.95);
-  drawEdges(ctx, proj, MESH.leftEye, WHITE, 0.68, dpr * 0.95);
-  drawEdges(ctx, proj, MESH.rightEye, WHITE, 0.68, dpr * 0.95);
-  drawEdges(ctx, proj, MESH.leftIris, ACCENT, 0.5, dpr * 0.85);
-  drawEdges(ctx, proj, MESH.rightIris, ACCENT, 0.5, dpr * 0.85);
-  drawEdges(ctx, proj, MESH.lips, WHITE, 0.7, dpr * 1.0);
+  drawEdges(ctx, proj, MESH.leftBrow, WHITE, 0.6 * featBoost, dpr * 0.95);
+  drawEdges(ctx, proj, MESH.rightBrow, WHITE, 0.6 * featBoost, dpr * 0.95);
+  drawEdges(ctx, proj, MESH.leftEye, WHITE, 0.68 * featBoost, dpr * 0.95);
+  drawEdges(ctx, proj, MESH.rightEye, WHITE, 0.68 * featBoost, dpr * 0.95);
+  drawEdges(ctx, proj, MESH.leftIris, ACCENT, 0.5 * featBoost, dpr * 0.85);
+  drawEdges(ctx, proj, MESH.rightIris, ACCENT, 0.5 * featBoost, dpr * 0.85);
+  drawEdges(ctx, proj, MESH.lips, WHITE, 0.7 * featBoost, dpr * 1.0);
 
   // silhouette — the actual landmark face oval: jaw, chin, temples.
   // Two passes: a wide faint glow under a crisp primary contour.

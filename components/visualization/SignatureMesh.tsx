@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { projectTurntable, drawSignatureMesh } from "@/lib/visualization/meshRender";
+import { extractEdges } from "@/lib/visualization/edgeExtract";
 import { regionBounds, type SourceRect } from "@/lib/vision/imageTransform";
 import type { Landmark } from "@/types/vision";
 
@@ -9,10 +10,15 @@ import type { Landmark } from "@/types/vision";
  * Visual Signature hero — the merged multi-view canonical point cloud
  * rendered on a slow turntable (±38° yaw, gentle pitch drift).
  *
- * When `reference` is provided, the captured frame is drawn inside the
- * same canvas, registered to the projection: the landmark bounding box
- * of the captured image is stretched onto the projected landmark
- * bounding box — same indices, same coordinate frame, one face.
+ * Layers (back → front):
+ *   1. captured-frame reference — faint, blurred
+ *   2. edge reference — Sobel lines extracted once from the capture
+ *      (glasses rims, brows, hairline, jaw) at low opacity
+ *   3. facial geometry — region-weighted canonical cloud (dominant)
+ *
+ * The photo and its edge map share one coordinate space; both are
+ * stretched onto the projected landmark bbox each frame — same indices,
+ * same transform, one registered face.
  */
 export interface SignatureReference {
   image: string;
@@ -26,16 +32,21 @@ export default function SignatureMesh({
   reference,
   size = 260,
   fun = false,
+  debug = false,
 }: {
   points: Float32Array | null;
   reference?: SignatureReference | null;
   size?: number;
   fun?: boolean;
+  debug?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const debugRef = useRef<HTMLCanvasElement>(null);
   const ptsRef = useRef(points);
   const refImgRef = useRef<HTMLImageElement | null>(null);
+  const edgeRef = useRef<HTMLCanvasElement | null>(null);
   const refSrcRef = useRef<SourceRect | null>(null);
+  const [refLoaded, setRefLoaded] = useState(0);
   const hasRef = !!reference;
 
   useEffect(() => {
@@ -44,6 +55,7 @@ export default function SignatureMesh({
 
   useEffect(() => {
     refImgRef.current = null;
+    edgeRef.current = null;
     refSrcRef.current = null;
     if (!reference) return;
     // landmark bbox in the captured image's pixel space — same transform
@@ -52,6 +64,7 @@ export default function SignatureMesh({
     const img = new Image();
     img.onload = () => {
       refImgRef.current = img;
+      edgeRef.current = extractEdges(img); // once per capture, cached
       refSrcRef.current = nb
         ? {
             x: nb.x * img.width,
@@ -60,9 +73,62 @@ export default function SignatureMesh({
             h: nb.h * img.height,
           }
         : null;
+      // async callback — re-triggers the debug layer strip
+      setRefLoaded((v) => v + 1);
     };
     img.src = reference.image;
   }, [reference]);
+
+  // DEBUG-only layer strip: CAPTURE / EDGES / GEOMETRY side by side so
+  // registration and edge quality can be inspected per layer
+  useEffect(() => {
+    const strip = debugRef.current;
+    if (!debug || !strip) return;
+    const ctx = strip.getContext("2d");
+    if (!ctx) return;
+    const img = refImgRef.current;
+    const edge = edgeRef.current;
+    const pts = ptsRef.current;
+    if (!img || !pts) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cell = 92;
+    const W = cell * 3 + 16;
+    strip.width = W * dpr;
+    strip.height = (cell + 14) * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = "#0b0d0e";
+    ctx.fillRect(0, 0, W, cell + 14);
+    ctx.font = "7px monospace";
+    ctx.textAlign = "center";
+
+    const src = refSrcRef.current;
+    const sx = src && img.width ? src.x : 0;
+    const sy = src && img.height ? src.y : 0;
+    const sw = src ? src.w : img.width;
+    const sh = src ? src.h : img.height;
+
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cell, cell);
+    ctx.fillStyle = "#8a94a0";
+    ctx.fillText("CAPTURE", cell / 2, cell + 9);
+
+    if (edge) {
+      const k = edge.width / img.width;
+      ctx.drawImage(
+        edge,
+        sx * k, sy * k, sw * k, sh * k,
+        cell + 8, 0, cell, cell,
+      );
+    }
+    ctx.fillText("EDGES", cell + 8 + cell / 2, cell + 9);
+
+    // geometry alone — frontal projection of the canonical cloud
+    const g3 = cell * 2 + 16;
+    const proj = projectTurntable(pts, 0, 0, g3 + cell / 2, cell / 2, cell * 0.45);
+    drawSignatureMesh(ctx, proj, 1);
+    ctx.fillStyle = "#8a94a0";
+    ctx.fillText("GEOMETRY", g3 + cell / 2, cell + 9);
+  }, [debug, hasRef, reference, points, refLoaded]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -96,8 +162,7 @@ export default function SignatureMesh({
         R,
       );
 
-      // captured-frame reference — registered to the projected landmark
-      // bbox each frame so the silhouette and mesh describe one position
+      // registered media layers — projected landmark bbox each frame
       const img = refImgRef.current;
       const src = refSrcRef.current;
       if (img && src && src.w > 0 && src.h > 0) {
@@ -117,18 +182,41 @@ export default function SignatureMesh({
         const my = dh * 0.08;
         const sx = mx * (src.w / dw);
         const sy = my * (src.h / dh);
+        const edge = edgeRef.current;
+
+        // 1. captured frame — faintest layer
         ctx.save();
-        ctx.globalAlpha = 0.12;
+        ctx.globalAlpha = 0.1;
         ctx.filter = "blur(2px)";
         ctx.drawImage(
           img,
           src.x - sx, src.y - sy, src.w + sx * 2, src.h + sy * 2,
           minX - mx, minY - my, dw + mx * 2, dh + my * 2,
         );
+        // 2. edge reference — real-image structure (glasses, brows,
+        // hairline) without showing a readable photograph
+        if (edge) {
+          const k = edge.width / img.width;
+          ctx.filter = "none";
+          ctx.globalAlpha = 0.17;
+          ctx.drawImage(
+            edge,
+            (src.x - sx) * k, (src.y - sy) * k,
+            (src.w + sx * 2) * k, (src.h + sy * 2) * k,
+            minX - mx, minY - my, dw + mx * 2, dh + my * 2,
+          );
+        }
         ctx.restore();
       }
 
-      drawSignatureMesh(ctx, proj, dpr);
+      // 3. facial geometry — dominant layer; in FUN the feature
+      // contours breathe with a slow highlight sweep
+      drawSignatureMesh(
+        ctx,
+        proj,
+        dpr,
+        fun ? (Math.sin(t * 1.9) + 1) / 2 : 0,
+      );
       // FUN pulse — brief glow ring on each orbit beat + sparse drifting
       // particles around the reconstruction
       if (fun) {
@@ -153,10 +241,19 @@ export default function SignatureMesh({
   }, [size, fun, hasRef]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: size, height: size }}
-      aria-hidden
-    />
+    <div>
+      <canvas
+        ref={canvasRef}
+        style={{ width: size, height: size }}
+        aria-hidden
+      />
+      {debug && hasRef && (
+        <canvas
+          ref={debugRef}
+          className="mt-2"
+          style={{ width: 3 * 92 + 16, height: 106 }}
+        />
+      )}
+    </div>
   );
 }
