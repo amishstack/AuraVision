@@ -51,6 +51,16 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
   const lockBlend = useRef(0);
   const funPrev = useRef(false);
   const funBurstAt = useRef(0);
+  // FUN reactivity — previous real-signal values + event timestamps.
+  // Events are edge-triggered (signal CHANGES), not continuously running.
+  const sig = useRef({
+    gazeX: 0, gazeY: 0, gazeEvt: 0,
+    mouthA: 0, mouthEvt: 0,
+    smile: 0, smileEvt: 0,
+    yaw: 0, ringBoost: 0, arcPhase: 0, lastT: 0,
+    stillSince: 0, lockEvt: 0,
+    energy: 0, motionEvt: 0,
+  });
   const depthCache = useRef<Float32Array | null>(null);
   const depthStamp = useRef(0);
   // Adaptive detail — surface triangle stride relaxes if drawing is slow.
@@ -263,8 +273,40 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
         : 1;
 
       if (funRef.current && e > 0.3) {
-        const t = performance.now() * 0.001;
+        const nowMs = performance.now();
+        const t = nowMs * 0.001;
         const burstBoost = 1 + (1 - burstT); // denser/brighter during burst
+        const S = sig.current;
+
+        // --- event detection (real signal deltas only) -------------------
+        const g = f.gaze;
+        if (g && g.confidence > 0.4) {
+          if (Math.hypot(g.dx - S.gazeX, g.dy - S.gazeY) > 0.2) S.gazeEvt = nowMs;
+          S.gazeX = g.dx;
+          S.gazeY = g.dy;
+        }
+        const mouthNow = f.dynamics?.mouthAperture ?? 0;
+        if (mouthNow - S.mouthA > 0.08) S.mouthEvt = nowMs;
+        S.mouthA = mouthNow;
+        const smileNow = f.dynamics?.smile ?? 0;
+        if (smileNow - S.smile > 0.15) S.smileEvt = nowMs;
+        S.smile = smileNow;
+        const yawNow = f.pose?.yawDeg ?? 0;
+        S.ringBoost = Math.min(1, S.ringBoost + Math.abs(yawNow - S.yaw) * 0.04);
+        S.yaw = yawNow;
+        S.ringBoost *= 0.95;
+        const dtS = Math.min(0.1, S.lastT ? (nowMs - S.lastT) / 1000 : 0.016);
+        S.lastT = nowMs;
+        S.arcPhase += dtS * (1.15 + S.ringBoost * 3.5);
+        const stabNow = f.metrics?.stability ?? 0;
+        if (stabNow > 0.82) {
+          if (!S.stillSince) S.stillSince = nowMs;
+          else if (nowMs - S.stillSince > 700 && nowMs - S.lockEvt > 4000)
+            S.lockEvt = nowMs;
+        } else S.stillSince = 0;
+        const enNow = f.dynamics?.energy ?? 0;
+        if (enNow - S.energy > 0.1) S.motionEvt = nowMs;
+        S.energy = enNow;
 
         // traveling pulse through the mesh — scaffold subset brightens
         // on a radial wave from the face center (~2.5s cycle)
@@ -309,10 +351,48 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
           }
         }
 
-        // mouth pulse — lip outline brightens with real mouth dynamics
+        // gaze trace — cyan trail fires when gaze direction CHANGES,
+        // decays over ~650ms
+        const gAge = nowMs - S.gazeEvt;
+        if (g && g.confidence > 0.4 && gAge < 650 && f.boundingBox) {
+          const bb0 = f.boundingBox;
+          const [gcx, gcy] = px({
+            x: bb0.x + bb0.w / 2,
+            y: bb0.y + bb0.h * 0.42,
+          });
+          const ga = (1 - gAge / 650) * 0.55 * e;
+          const gx = gcx + g.dx * 46 * dpr;
+          const gy = gcy + g.dy * 46 * dpr;
+          ctx.strokeStyle = `rgba(${ACCENT}, ${ga})`;
+          ctx.lineWidth = 1.2 * dpr;
+          ctx.beginPath();
+          ctx.moveTo(gcx, gcy);
+          ctx.lineTo(gx, gy);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(gx, gy, 2.4 * dpr, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // mouth ripple — radial ring from the mouth on aperture change,
+        // plus a lip pulse that follows live aperture
+        const mAge = nowMs - S.mouthEvt;
         const mouth = f.dynamics?.mouthAperture ?? 0;
-        if (mouth > 0.12) {
-          ctx.strokeStyle = `rgba(${ACCENT}, ${Math.min(0.5, mouth * 0.9) * e})`;
+        if (mAge < 520 && lm[13] && lm[14]) {
+          const [mx1, my1] = px(lm[13]);
+          const [mx2, my2] = px(lm[14]);
+          const rr = (6 + mAge * 0.055) * dpr;
+          ctx.strokeStyle = `rgba(${ACCENT}, ${(1 - mAge / 520) * 0.5 * e})`;
+          ctx.lineWidth = dpr;
+          ctx.beginPath();
+          ctx.arc((mx1 + mx2) / 2, (my1 + my2) / 2, rr, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        if (mouth > 0.12 || nowMs - S.smileEvt < 700) {
+          const lipGlow =
+            Math.min(0.5, mouth * 0.9) +
+            Math.max(0, 1 - (nowMs - S.smileEvt) / 700) * 0.45;
+          ctx.strokeStyle = `rgba(${ACCENT}, ${Math.min(0.7, lipGlow) * e})`;
           ctx.lineWidth = 1.4 * dpr;
           ctx.beginPath();
           for (const ed of MESH.lips) {
@@ -324,22 +404,26 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
             ctx.lineTo(bx, by);
           }
           ctx.stroke();
-        }
-
-        // gaze marker — small indicator offset by the real gaze vector
-        if (f.gaze && f.gaze.confidence > 0.4 && f.boundingBox) {
-          const bb0 = f.boundingBox;
-          const [gcx, gcy] = px({
-            x: bb0.x + bb0.w / 2,
-            y: bb0.y + bb0.h / 2,
-          });
-          const gx = gcx + f.gaze.dx * 34 * dpr;
-          const gy = gcy + f.gaze.dy * 34 * dpr;
-          ctx.strokeStyle = `rgba(${ACCENT}, ${0.45 * e})`;
-          ctx.lineWidth = dpr;
-          ctx.beginPath();
-          ctx.arc(gx, gy, 3.2 * dpr, 0, Math.PI * 2);
-          ctx.stroke();
+          // smile event — brief cheek sparkle (no semantics, just geometry)
+          const sAge = nowMs - S.smileEvt;
+          if (sAge < 700) {
+            for (const idx of [116, 345]) {
+              const p = lm[idx];
+              if (!p) continue;
+              const [cxp, cyp] = px(p);
+              for (let k = 0; k < 4; k++) {
+                const ang = k * 1.57 + sAge * 0.004;
+                const rr = (4 + sAge * 0.02) * dpr;
+                ctx.fillStyle = `rgba(${ACCENT}, ${(1 - sAge / 700) * 0.5 * e})`;
+                ctx.fillRect(
+                  cxp + Math.cos(ang) * rr - dpr * 0.6,
+                  cyp + Math.sin(ang) * rr - dpr * 0.6,
+                  1.2 * dpr,
+                  1.2 * dpr,
+                );
+              }
+            }
+          }
         }
 
         // landmark twinkle
@@ -367,20 +451,55 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
             ctx.stroke();
           }
 
-          // faint persistent orbit ring + slow sweep arc (~5s
-          // rotation); ring radius responds gently to head yaw
+          // faint persistent orbit ring + sweep arc — accelerates with
+          // head-turn events (ringBoost), decays back to ambient speed
           const yawResp = 1 + Math.min(0.08, Math.abs(f.pose?.yawDeg ?? 0) * 0.002);
           const r = rBase * 0.62 * yawResp;
-          ctx.strokeStyle = `rgba(${ACCENT}, ${0.07 * e})`;
+          ctx.strokeStyle = `rgba(${ACCENT}, ${(0.07 + S.ringBoost * 0.1) * e})`;
           ctx.lineWidth = dpr;
           ctx.beginPath();
           ctx.arc(bcx, bcy, r, 0, Math.PI * 2);
           ctx.stroke();
-          const a0 = t * 1.15 + (f.pose?.yawDeg ?? 0) * 0.01;
+          const a0 = S.arcPhase;
           ctx.strokeStyle = `rgba(${ACCENT}, ${0.34 * e})`;
           ctx.beginPath();
           ctx.arc(bcx, bcy, r, a0, a0 + 0.9);
           ctx.stroke();
+
+          // sustained-stillness "LOCK" pulse — one soft ring, then calm
+          const lAge = nowMs - S.lockEvt;
+          if (lAge < 900) {
+            const lr = rBase * (0.55 + (lAge / 900) * 0.5);
+            ctx.strokeStyle = `rgba(${ACCENT}, ${(1 - lAge / 900) * 0.4 * e})`;
+            ctx.lineWidth = dpr;
+            ctx.beginPath();
+            ctx.arc(bcx, bcy, lr, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+
+          // rapid-motion flash — scaffold brightens + quick sweep echo
+          const moAge = nowMs - S.motionEvt;
+          if (moAge < 400) {
+            const moA = (1 - moAge / 400) * 0.16 * e;
+            ctx.strokeStyle = `rgba(${ACCENT}, ${moA})`;
+            ctx.lineWidth = 0.7 * dpr;
+            ctx.beginPath();
+            for (let i = 0; i < scaffold.length; i += 5) {
+              const ed = scaffold[i];
+              const A = lm[ed.start], B = lm[ed.end];
+              if (!A || !B) continue;
+              const [ax, ay] = px(A);
+              const [bx, by] = px(B);
+              ctx.moveTo(ax, ay);
+              ctx.lineTo(bx, by);
+            }
+            ctx.stroke();
+            const sweepA = S.arcPhase * -1.5;
+            ctx.strokeStyle = `rgba(${ACCENT}, ${(1 - moAge / 400) * 0.4 * e})`;
+            ctx.beginPath();
+            ctx.arc(bcx, bcy, r * 0.85, sweepA, sweepA + 1.4);
+            ctx.stroke();
+          }
 
           // sparse particles drifting on the ring
           for (let i = 0; i < 10; i++) {

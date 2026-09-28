@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   projectTurntable,
+  projectParallax,
   drawSignatureMesh,
   drawSilhouetteSweep,
 } from "@/lib/visualization/meshRender";
@@ -31,19 +32,21 @@ export interface SignatureReference {
   mirrored: boolean;
 }
 
-// cinematic turntable — monocular reconstruction is only confident near
-// frontal, so the orbit lives in a restrained ±15° envelope with eased
-// dwells; never a profile. Keyframes: [ms, degrees]
+// holographic parallax turntable (V6.6) — the face stays frontal; the
+// keyframes drive parallax INTENSITY, not physical yaw. Monocular
+// depth is only confident near-frontal, so identity anchors never
+// deform and the hero is front-facing most of the loop.
+// Keyframes: [ms, turn] where turn ∈ [-1, 1].
 const ORBIT_KEYS: readonly (readonly [number, number])[] = [
   [0, 0],
-  [900, 0],      // front dwell
-  [2000, 15],    // → +15°
-  [2350, 15],    // dwell
-  [3250, 0],     // → front
-  [4350, -15],   // → -15°
-  [4700, -15],   // dwell
-  [5600, 0],     // → front
-  [6800, 0],     // hero dwell
+  [900, 0],      // front hero
+  [1550, 1],     // → parallax right
+  [1750, 1],     // brief hold
+  [2450, 0],     // → front
+  [3100, -1],    // → parallax left
+  [3300, -1],    // brief hold
+  [4000, 0],     // → front
+  [5200, 0],     // long hero hold
 ];
 const ORBIT_PERIOD = ORBIT_KEYS[ORBIT_KEYS.length - 1][0];
 
@@ -52,8 +55,8 @@ function smoothstep(a: number, b: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** eased yaw in degrees at time t (ms) — loops the keyframe envelope */
-function turntableYawDeg(t: number): number {
+/** eased turn value ∈ [-1,1] at time t (ms) — loops the envelope */
+function turntableTurn(t: number): number {
   const tt = t % ORBIT_PERIOD;
   for (let i = 0; i < ORBIT_KEYS.length - 1; i++) {
     const [t0, a0] = ORBIT_KEYS[i];
@@ -65,12 +68,16 @@ function turntableYawDeg(t: number): number {
   return 0;
 }
 
-/** presentation confidence by |yaw| — 1.0 frontal → 0.75 at ±15° */
-function viewConfidence(yawDeg: number): number {
-  const a = Math.abs(yawDeg);
-  if (a <= 8) return 1;
-  if (a <= 12) return 1 - 0.1 * smoothstep(8, 12, a);
-  return 0.9 - 0.15 * smoothstep(12, 15, a);
+/**
+ * Parallax confidence tiers — |turn| ≤ 0.5 full detail, ≤ 0.8 mild
+ * interior reduction, ≤ 1.0 IDENTITY LOCK (silhouette/features full,
+ * interior thin). Used only for presentation.
+ */
+function viewConfidence(turn: number): number {
+  const a = Math.abs(turn);
+  if (a <= 0.5) return 1;
+  if (a <= 0.8) return 1 - 0.15 * smoothstep(0.5, 0.8, a);
+  return 0.85 - 0.1 * smoothstep(0.8, 1, a);
 }
 
 export default function SignatureMesh({
@@ -192,7 +199,7 @@ export default function SignatureMesh({
     canvas.height = size * dpr;
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
-    const R = canvas.width * 0.58; // hero scale — reconstruction is dominant
+    const R = canvas.width * 0.64; // hero scale — reconstruction is dominant
 
     let raf = 0;
     const t0 = performance.now();
@@ -202,16 +209,9 @@ export default function SignatureMesh({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (!pts || pts.length === 0) return;
       const t = (performance.now() - t0) / 1000;
-      const yawDeg = turntableYawDeg(t * 1000);
-      const conf = viewConfidence(yawDeg);
-      const proj = projectTurntable(
-        pts,
-        (yawDeg * Math.PI) / 180,
-        fun ? Math.sin(t * 0.31) * 0.12 : Math.sin(t * 0.22) * 0.09,
-        cx,
-        cy,
-        R,
-      );
+      const turn = turntableTurn(t * 1000);
+      const conf = viewConfidence(turn);
+      const proj = projectParallax(pts, turn, cx, cy, R);
 
       // registered media layers — projected landmark bbox each frame
       const img = refImgRef.current;
@@ -307,7 +307,9 @@ export default function SignatureMesh({
         ctx.font = `${8 * dpr}px monospace`;
         ctx.textAlign = "left";
         ctx.fillText(
-          `YAW ${yawDeg.toFixed(1)}°  CONF ${conf.toFixed(2)}`,
+          `PARALLAX ${turn.toFixed(2)}  CONF ${conf.toFixed(2)}  ${
+            conf < 0.9 ? "IDENTITY LOCK" : "FULL DETAIL"
+          }`,
           6 * dpr,
           12 * dpr,
         );

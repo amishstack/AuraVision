@@ -44,6 +44,78 @@ export function projectTurntable(
 }
 
 // ---------------------------------------------------------------------------
+// Identity-preserving parallax (V6.6)
+//
+// MediaPipe z is relative facial-surface depth — NOT a volumetric head
+// scan. Rigidly rotating the cloud past ~±10° produces a malformed side
+// profile. Instead the hero stays frontal and turn is expressed as
+// bounded screen-space parallax: interior/mid-face structure (nose,
+// cheeks) displaces with depth while identity anchors (eyes, jaw,
+// silhouette) barely move. The hologram turns; the face never breaks.
+// ---------------------------------------------------------------------------
+
+let plxCache: Float32Array | null = null;
+
+/** Per-landmark parallax weight: identity anchors ~0.35, interior 1.0. */
+function parallaxWeights(): Float32Array {
+  if (plxCache) return plxCache;
+  const w = new Float32Array(478).fill(1.0);
+  const pin = (idx: number, v: number) => {
+    if (idx < w.length) w[idx] = Math.min(w[idx], v);
+  };
+  // identity anchors — silhouette, eyes, iris: near-locked
+  for (const set of [MESH.faceOval, MESH.leftEye, MESH.rightEye, MESH.leftIris, MESH.rightIris]) {
+    for (const e of set) {
+      pin(e.start, 0.35);
+      pin(e.end, 0.35);
+    }
+  }
+  // lips + brows — mostly anchored
+  for (const set of [MESH.lips, MESH.leftBrow, MESH.rightBrow]) {
+    for (const e of set) {
+      pin(e.start, 0.65);
+      pin(e.end, 0.65);
+    }
+  }
+  // nose ridge/base — strongest parallax (it's the nearest structure)
+  for (const idx of NOSE_RIDGE) w[idx] = 1.0;
+  for (const idx of NOSE_BASE) w[idx] = 1.0;
+  plxCache = w;
+  return w;
+}
+
+/**
+ * Parallax projection — `turn` ∈ [-1, 1] drives bounded lateral offset:
+ * nearer (lower z) interior landmarks shift further; anchored features
+ * stay put. A subtle horizontal squash sells the turn without ever
+ * forming a profile.
+ */
+export function projectParallax(
+  pts: Float32Array,
+  turn: number,
+  cx: number,
+  cy: number,
+  radius: number,
+): Projection {
+  const plx = parallaxWeights();
+  const n = pts.length / 3;
+  const sx = new Float32Array(n);
+  const sy = new Float32Array(n);
+  const sz = new Float32Array(n);
+  const squash = 1 - 0.06 * Math.abs(turn);
+  const K = 0.38; // max depth-displacement gain — bounded by design
+  for (let i = 0; i < n; i++) {
+    const x = pts[i * 3], y = pts[i * 3 + 1], z = pts[i * 3 + 2];
+    // nearer structure (negative z convention: nose < edges) shifts most
+    const depthN = Math.max(-1, Math.min(1, -z * 3)); // nose-forward → +1
+    sx[i] = cx + (x * squash - depthN * plx[i] * turn * K) * radius;
+    sy[i] = cy + y * radius * (1 - 0.03 * Math.abs(turn));
+    sz[i] = z;
+  }
+  return { sx, sy, sz, n };
+}
+
+// ---------------------------------------------------------------------------
 // Facial-region presentation weights
 //
 // Humans recognize a face from its high-structure regions — silhouette,
@@ -182,8 +254,10 @@ export function drawSignatureMesh(
 
   // silhouette — the actual landmark face oval: jaw, chin, temples.
   // Two passes: a wide faint glow under a crisp primary contour.
+  // Brightens slightly as interior detail thins ("holographic lock").
+  const lockGlow = 1 + (1 - conf) * 0.2;
   drawEdges(ctx, proj, MESH.faceOval, WHITE, 0.16, dpr * 3.2);
-  drawEdges(ctx, proj, MESH.faceOval, WHITE, 0.78, dpr * 1.3);
+  drawEdges(ctx, proj, MESH.faceOval, WHITE, Math.min(0.92, 0.78 * lockGlow), dpr * 1.3);
 
   // nodes — weighted by facial region; depth (relative z) modulates both
   // brightness and size so nearer structure reads forward. Interior
