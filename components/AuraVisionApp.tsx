@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { AnalysisReport, DirectorResult as DirectorResultT, DirectorTarget } from "@/types/vision";
+import type { AnalysisReport, DirectorResult as DirectorResultT } from "@/types/vision";
 import { useFaceTracking } from "@/lib/tracking/useFaceTracking";
 import { useTelemetry } from "@/lib/tracking/useTelemetry";
 import CameraFeed from "@/components/camera/CameraFeed";
@@ -43,7 +43,6 @@ export default function AuraVisionApp() {
   const [savedDirector, setSavedDirector] = useState<DirectorResultT | null>(null);
   const [viewingSaved, setViewingSaved] = useState(false);
   const [viewingDirector, setViewingDirector] = useState(false);
-  const [directorPicker, setDirectorPicker] = useState(false);
   const [fun, setFun] = useState(false);
   const [wasComplete, setWasComplete] = useState(false);
   if (snap.state === "complete" && !wasComplete) {
@@ -86,20 +85,12 @@ export default function AuraVisionApp() {
     setViewingDirector(false);
     startDeepScan();
   };
-  const beginDirector = (target: DirectorTarget) => {
-    setDirectorPicker(false);
+  const beginDirector = () => {
     setSavedDirector(null);
     setViewingSaved(false);
     setViewingDirector(false);
-    startDirector(target);
+    startDirector();
   };
-  // default director target: reuse preferredView from a prior scan
-  const defaultTarget: DirectorTarget =
-    savedReport?.preferredView === "LEFT 3/4"
-      ? "left"
-      : savedReport?.preferredView === "RIGHT 3/4"
-        ? "right"
-        : "frontal";
 
   const isError = snap.state === "error";
   const mirrored = facing === "user";
@@ -134,9 +125,7 @@ export default function AuraVisionApp() {
                 DEEP ANALYSIS
               </button>
               <button
-                onClick={() =>
-                  directorPicker ? beginDirector(defaultTarget) : setDirectorPicker(true)
-                }
+                onClick={beginDirector}
                 className={`font-mono font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 ${
                   demo
                     ? "rounded border border-neutral-600 px-4 py-2 text-[11px] text-neutral-100"
@@ -209,7 +198,12 @@ export default function AuraVisionApp() {
       <div className="flex flex-1 items-center justify-center px-3 pb-4 sm:px-6 sm:pb-6">
         <div className="relative aspect-[3/4] w-full max-w-5xl overflow-hidden rounded-md border border-neutral-800/80 bg-black sm:aspect-video">
           <CameraFeed videoRef={videoRef} mirrored={mirrored} />
-          <FaceMeshOverlay frame={frameRef} videoRef={videoRef} debug={debug} />
+          <FaceMeshOverlay
+            frame={frameRef}
+            videoRef={videoRef}
+            debug={debug}
+            fun={fun}
+          />
 
           {/* subtle viewport frame */}
           <div className="pointer-events-none absolute inset-0 rounded-md ring-1 ring-inset ring-white/[0.04]" />
@@ -218,42 +212,6 @@ export default function AuraVisionApp() {
           {(snap.state === "searching" || snap.state === "boot") && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <div className="h-16 w-16 rounded-full border border-neutral-700/50" />
-            </div>
-          )}
-
-          {/* director target picker */}
-          {directorPicker && snap.state !== "director" && (
-            <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded bg-black/70 px-5 py-4 font-mono backdrop-blur-sm">
-              <div className="mb-3 text-center text-[9px] tracking-[0.25em] text-neutral-400">
-                TARGET VIEW
-              </div>
-              <div className="flex gap-2">
-                {(
-                  [
-                    ["frontal", "FRONTAL"],
-                    ["left", "LEFT 3/4"],
-                    ["right", "RIGHT 3/4"],
-                  ] as const
-                ).map(([t, lbl]) => (
-                  <button
-                    key={t}
-                    onClick={() => beginDirector(t)}
-                    className={`min-h-11 rounded border px-4 py-2 text-[10px] tracking-[0.15em] transition-colors ${
-                      t === defaultTarget
-                        ? "border-cyan-300/60 text-cyan-200"
-                        : "border-neutral-700 text-neutral-300 hover:border-neutral-500"
-                    }`}
-                  >
-                    {lbl}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => setDirectorPicker(false)}
-                className="mt-3 block w-full text-center text-[9px] tracking-[0.2em] text-neutral-500 hover:text-neutral-300"
-              >
-                CANCEL
-              </button>
             </div>
           )}
 
@@ -299,8 +257,8 @@ export default function AuraVisionApp() {
             </div>
           )}
 
-          {/* Layer C — system interface */}
-          <SystemInterface snap={snap} debug={debug} />
+          {/* Layer C — system interface (hidden while a result owns the viewport) */}
+          {!showResult && <SystemInterface snap={snap} debug={debug} fun={fun} />}
 
           {/* debug — top right inside viewport */}
           {debug && (
@@ -315,6 +273,7 @@ export default function AuraVisionApp() {
               report={activeReport}
               frame={frameRef}
               videoRef={videoRef}
+              fun={fun}
               onClose={closeResult}
             />
           )}

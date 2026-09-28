@@ -38,7 +38,7 @@ export default function DirectorOverlay({
         )}
         {fun && d.phase !== "init" && (
           <div className="mt-1 text-[8px] tracking-[0.2em] text-cyan-200/70">
-            {d.phase === "ready" ? "CAMERA LIKES THIS" : "FINDING THE ANGLE"}
+            {funCopy(d.instruction, d.phase)}
           </div>
         )}
       </div>
@@ -77,4 +77,15 @@ export default function DirectorOverlay({
       </div>
     </>
   );
+}
+
+function funCopy(instruction: string, phase: string): string {
+  if (phase === "ready") return "FRAME LOCKED.";
+  if (instruction === "HOLD STILL") return "HOLD IT…";
+  if (instruction === "PORTRAIT READY") return "PORTRAIT ACQUIRED.";
+  if (instruction === "LOOK AT CAMERA") return "EYES HERE.";
+  if (instruction === "MOVE CLOSER") return "ALMOST THERE.";
+  if (instruction === "MOVE BACK") return "GIVE IT ROOM.";
+  if (instruction === "ACQUIRING FACE") return "SCANNING…";
+  return "WORKING THE ANGLE.";
 }

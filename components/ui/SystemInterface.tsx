@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { TrackingFrame, TrackingState } from "@/types/vision";
 
 /**
@@ -52,12 +53,23 @@ function Module({
   );
 }
 
+const FUN_LINES = [
+  "GEOMETRY LOCKED",
+  "AURA ACQUIRED",
+  "FRAME READY",
+  "CAMERA LOVES THIS ANGLE",
+  "LOOKING GOOD",
+  "NICE HOLD",
+];
+
 export default function SystemInterface({
   snap,
   debug,
+  fun = false,
 }: {
   snap: TrackingFrame;
   debug: boolean;
+  fun?: boolean;
 }) {
   const hasFace =
     snap.state === "tracking" ||
@@ -65,6 +77,13 @@ export default function SystemInterface({
     snap.state === "occluded" ||
     snap.state === "analysis" ||
     snap.state === "director";
+
+  const [funIdx, setFunIdx] = useState(0);
+  useEffect(() => {
+    if (!fun) return;
+    const t = setInterval(() => setFunIdx((i) => i + 1), 4200);
+    return () => clearInterval(t);
+  }, [fun]);
 
   return (
     <>
@@ -90,6 +109,11 @@ export default function SystemInterface({
               : STATE_LABEL[snap.state]}
           </span>
         </div>
+        {fun && snap.state === "locked" && (
+          <div className="mt-0.5 text-[8px] tracking-[0.2em] text-cyan-200/70">
+            {FUN_LINES[funIdx % FUN_LINES.length]}
+          </div>
+        )}
       </div>
 
       {/* guided deep-analysis — instruction + checklist */}

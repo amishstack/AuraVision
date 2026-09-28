@@ -54,21 +54,24 @@ export default function DirectorResult({
   const r = result.readiness;
 
   return (
-    <div className="absolute inset-0 z-10 overflow-y-auto bg-[#0b0d0e]/95 animate-[fadeIn_0.6s_ease-out]">
+    <div className="absolute inset-0 z-10 overflow-y-auto bg-[#0b0d0e] animate-[fadeIn_0.6s_ease-out]">
       <div className="mx-auto flex min-h-full w-full max-w-sm flex-col items-center px-6 py-6 font-mono tracking-[0.15em]">
         <div className="text-[10px] tracking-[0.3em] text-neutral-500">
           AURAVISION
         </div>
-        <div className="mt-3 text-sm font-medium tracking-[0.35em] text-neutral-100">
+        <div className="mt-3 text-[11px] font-medium tracking-[0.35em] text-neutral-100">
+          DIRECTOR RESULT
+        </div>
+        <div className="mt-3 text-sm font-medium tracking-[0.3em] text-cyan-200/90">
           PORTRAIT READY
         </div>
         <div className="mt-1 text-[9px] tracking-[0.25em] text-neutral-500">
-          OPTIMIZED CAMERA COMPOSITION
+          OPTIMAL CAMERA COMPOSITION
         </div>
 
-        {/* captured portrait */}
+        {/* captured portrait — hero */}
         {result.frame && (
-          <div className="my-6 w-full max-w-[300px]">
+          <div className="my-6 w-full">
             <OptimalFrame best={result.frame} mirrored={frame.current.mirrored} />
           </div>
         )}
@@ -137,23 +140,23 @@ export default function DirectorResult({
 
         <div className="mt-5 grid w-full grid-cols-2 gap-3 pb-6">
           <button
-            onClick={share}
-            disabled={sharing}
-            className="min-h-11 rounded border border-neutral-700 py-2.5 text-[10px] tracking-[0.2em] text-neutral-200 transition-colors hover:border-neutral-500 disabled:opacity-50"
-          >
-            {sharing ? "…" : "SHARE"}
-          </button>
-          <button
             onClick={onDeepAnalysis}
             className="min-h-11 rounded border border-neutral-700 py-2.5 text-[10px] tracking-[0.2em] text-neutral-300 transition-colors hover:border-neutral-500"
           >
             DEEP ANALYSIS
           </button>
           <button
+            onClick={share}
+            disabled={sharing}
+            className="min-h-11 rounded border border-neutral-700 py-2.5 text-[10px] tracking-[0.2em] text-neutral-200 transition-colors hover:border-neutral-500 disabled:opacity-50"
+          >
+            {sharing ? "…" : "SHARE PORTRAIT"}
+          </button>
+          <button
             onClick={onLive}
             className="min-h-11 col-span-2 rounded border border-neutral-700 py-2.5 text-[10px] tracking-[0.2em] text-neutral-300 transition-colors hover:border-neutral-500"
           >
-            LIVE / VIEW GEOMETRY
+            BACK TO LIVE
           </button>
         </div>
       </div>

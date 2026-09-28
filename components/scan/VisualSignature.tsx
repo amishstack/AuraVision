@@ -19,11 +19,13 @@ export default function VisualSignature({
   report,
   frame,
   videoRef,
+  fun = false,
   onClose,
 }: {
   report: AnalysisReport;
   frame: MutableRefObject<TrackingFrame>;
   videoRef: MutableRefObject<HTMLVideoElement | null>;
+  fun?: boolean;
   onClose: () => void;
 }) {
   const [showInfo, setShowInfo] = useState(false);
@@ -59,7 +61,7 @@ export default function VisualSignature({
   };
 
   return (
-    <div className="absolute inset-0 z-10 overflow-y-auto bg-[#0b0d0e]/95 animate-[fadeIn_0.6s_ease-out]">
+    <div className="absolute inset-0 z-10 overflow-y-auto bg-[#0b0d0e] animate-[fadeIn_0.6s_ease-out]">
       <div className="mx-auto flex min-h-full w-full max-w-sm flex-col items-center px-6 py-6 font-mono tracking-[0.15em]">
         <div className="text-[10px] tracking-[0.3em] text-neutral-500">
           AURAVISION
@@ -71,18 +73,33 @@ export default function VisualSignature({
           MONOCULAR RGB — BROWSER-SIDE ANALYSIS
         </div>
 
-        {/* hero — aura field behind the reconstruction */}
+        {/* hero — aura field + captured-frame silhouette behind the reconstruction */}
         <Section delay={0} className="my-5">
           <div className="relative">
             <div className="absolute inset-0 opacity-70">
               <AuraField report={report} size={300} />
             </div>
-            <SignatureMesh points={report.signaturePoints} size={300} />
+            {report.bestFrame && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={report.bestFrame.image}
+                alt=""
+                aria-hidden
+                className="absolute inset-0 h-[300px] w-[300px] object-cover opacity-[0.13] blur-[2px]"
+              />
+            )}
+            <SignatureMesh points={report.signaturePoints} size={300} fun={fun} />
           </div>
           <div className="mt-2 text-center text-[9px] leading-4 tracking-[0.25em] text-neutral-500">
             MONOCULAR FACIAL RECONSTRUCTION
             <br />
             {report.landmarkCount} LANDMARKS · MULTI-VIEW · LOCAL ONLY
+            {fun && (
+              <>
+                <br />
+                <span className="text-cyan-200/70">SIGNATURE ACQUIRED</span>
+              </>
+            )}
           </div>
         </Section>
 

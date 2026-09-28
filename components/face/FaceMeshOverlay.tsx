@@ -33,14 +33,17 @@ interface Props {
   frame: MutableRefObject<TrackingFrame>;
   videoRef: MutableRefObject<HTMLVideoElement | null>;
   debug: boolean;
+  fun?: boolean;
 }
 
-export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
+export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const debugRef = useRef(debug);
+  const funRef = useRef(fun);
   useEffect(() => {
     debugRef.current = debug;
-  }, [debug]);
+    funRef.current = fun;
+  }, [debug, fun]);
   const scaffold = useMemo(() => sparseScaffold(6), []);
   const triangles = useMemo(() => faceTriangles(), []);
   const env = useRef(0);
@@ -205,14 +208,19 @@ export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
         }
       };
 
+      // FUN mode: subtle breathing shimmer on geometry intensity
+      const funAmp = funRef.current
+        ? 1 + 0.26 * Math.sin(performance.now() * 0.0022)
+        : 1;
+
       // --- L4 interior scaffold (depth field) ---------------------------
-      drawScaffold((0.10 + 0.16 * lock) * e * sMesh, 0.6);
+      drawScaffold((0.10 + 0.16 * lock) * e * sMesh * funAmp, 0.6);
 
       // --- L3 secondary contours ---------------------------------------
-      drawEdges(MESH.contours, ACCENT, (0.13 + 0.10 * lock) * e * sFeat, 0.7);
+      drawEdges(MESH.contours, ACCENT, (0.13 + 0.10 * lock) * e * sFeat * funAmp, 0.7);
 
       // --- L2 features ---------------------------------------------------
-      const featA = (0.34 + 0.30 * lock) * e * sFeat;
+      const featA = (0.34 + 0.30 * lock) * e * sFeat * funAmp;
       drawEdges(MESH.leftEye, WHITE, featA, 1.0);
       drawEdges(MESH.rightEye, WHITE, featA, 1.0);
       drawEdges(MESH.lips, WHITE, featA, 1.0);
@@ -236,7 +244,7 @@ export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
       }
 
       // --- L1 face silhouette -------------------------------------------
-      drawEdges(MESH.faceOval, WHITE, (0.30 + 0.38 * lock) * e * sOval, 1.2);
+      drawEdges(MESH.faceOval, WHITE, (0.30 + 0.38 * lock) * e * sOval * funAmp, 1.2);
 
       // --- subtle surface tint inside the oval ---------------------------
       if (lock > 0.25 && f.boundingBox) {

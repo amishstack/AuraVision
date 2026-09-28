@@ -55,6 +55,8 @@ const lightScore01 = (lm: LightingInfo | null): number =>
 
 export class DirectorEngine {
   private target: DirectorTarget = "frontal";
+  private targetLocked = false;
+  private adoptUntil = 0; // window to adopt the user's natural angle
   private startAt = 0;
   private readySince = 0;
   private forceDone = false;
@@ -128,8 +130,10 @@ export class DirectorEngine {
     ];
   }
 
-  begin(now: number, target: DirectorTarget): void {
-    this.target = target;
+  begin(now: number): void {
+    this.target = "frontal";
+    this.targetLocked = false;
+    this.adoptUntil = now + 1400; // observe the user's natural pose briefly
     this.checks = this.buildChecks();
     this.startAt = now;
     this.readySince = 0;
@@ -143,6 +147,22 @@ export class DirectorEngine {
 
   update(input: DirectorInput, now: number): void {
     this.lastInput = input;
+    // Adaptive target: if the user naturally holds a ¾ angle during the
+    // adoption window, take that side as the internal target. The user
+    // never sees "target view" terminology.
+    if (!this.targetLocked && now < this.adoptUntil && input.pose) {
+      const yaw = input.pose.yawDeg;
+      if (yaw < -16) {
+        this.target = "left";
+        this.checks = this.buildChecks();
+      } else if (yaw > 16) {
+        this.target = "right";
+        this.checks = this.buildChecks();
+      }
+    }
+    if (!this.targetLocked && now >= this.adoptUntil) {
+      this.targetLocked = true;
+    }
     if (input.lighting) {
       this.lastLight = input.lighting;
       if (!this.beforeLight) this.beforeLight = input.lighting;

@@ -10,7 +10,6 @@ import { LightingAnalyzer } from "@/lib/lighting/lighting";
 import { DeepAnalysisRunner } from "@/lib/analysis/runner";
 import { BestFrameEngine, toBestFrameResult } from "@/lib/bestFrame/bestFrame";
 import { DirectorEngine } from "@/lib/director/director";
-import type { DirectorTarget } from "@/types/vision";
 import { estimateGaze } from "@/lib/gaze/gaze";
 import { measureDynamics, type BlendshapeSignals } from "@/lib/dynamics/dynamics";
 import { computeDepthField } from "@/lib/depth/depth";
@@ -88,8 +87,8 @@ export interface TrackingControls {
   frameRef: MutableRefObject<TrackingFrame>;
   /** Request a Deep Scan — takes effect when tracking is stable. */
   startDeepScan: () => void;
-  /** Request Director Mode with a target view. */
-  startDirector: (target: DirectorTarget) => void;
+  /** Request Director Mode — universal, adaptive target. */
+  startDirector: () => void;
   /** Gracefully finish Director Mode with the best available frame. */
   directorSkip: () => void;
   /** Leave the visual-profile screen, back to live tracking. */
@@ -106,7 +105,6 @@ export function useFaceTracking(
   const profileExit = useRef(false);
   const directorRequested = useRef(false);
   const directorSkip = useRef(false);
-  const directorTarget = useRef<DirectorTarget>("frontal");
 
   useEffect(() => {
     Object.assign(frameRef.current, createInitialFrame());
@@ -283,7 +281,7 @@ export function useFaceTracking(
           if (directorRequested.current) {
             directorRequested.current = false;
             if (frame.state === "tracking" || frame.state === "locked") {
-              director.begin(now, directorTarget.current);
+              director.begin(now);
               bestFrames.reset();
               frame.optimalFrame = null;
               frame.directorResult = null;
@@ -539,8 +537,7 @@ export function useFaceTracking(
     startDeepScan: () => {
       scanRequested.current = true;
     },
-    startDirector: (target: DirectorTarget) => {
-      directorTarget.current = target;
+    startDirector: () => {
       directorRequested.current = true;
     },
     directorSkip: () => {

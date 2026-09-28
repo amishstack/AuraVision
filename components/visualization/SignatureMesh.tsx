@@ -10,9 +10,11 @@ import { projectTurntable, drawSignatureMesh } from "@/lib/visualization/meshRen
 export default function SignatureMesh({
   points,
   size = 260,
+  fun = false,
 }: {
   points: Float32Array | null;
   size?: number;
+  fun?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ptsRef = useRef(points);
@@ -31,7 +33,7 @@ export default function SignatureMesh({
     canvas.height = size * dpr;
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
-    const R = canvas.width * 0.42;
+    const R = canvas.width * 0.45;
 
     let raf = 0;
     const t0 = performance.now();
@@ -43,17 +45,28 @@ export default function SignatureMesh({
       const t = (performance.now() - t0) / 1000;
       const proj = projectTurntable(
         pts,
-        Math.sin(t * 0.55) * 0.66,   // ±~38°
-        Math.sin(t * 0.22) * 0.10,
+        fun
+          ? Math.sin(t * 0.85) * 0.78 // livelier ±~45° orbit in FUN
+          : Math.sin(t * 0.55) * 0.66,
+        fun ? Math.sin(t * 0.31) * 0.14 : Math.sin(t * 0.22) * 0.10,
         cx,
         cy,
         R,
       );
       drawSignatureMesh(ctx, proj, dpr);
+      // FUN pulse — brief glow ring on each orbit beat
+      if (fun) {
+        const beat = (Math.sin(t * 1.7) + 1) / 2;
+        ctx.strokeStyle = `rgba(140,210,240,${0.05 + beat * 0.08})`;
+        ctx.lineWidth = dpr;
+        ctx.beginPath();
+        ctx.arc(cx, cy, R * (0.72 + beat * 0.06), 0, Math.PI * 2);
+        ctx.stroke();
+      }
     };
     raf = requestAnimationFrame(render);
     return () => cancelAnimationFrame(raf);
-  }, [size]);
+  }, [size, fun]);
 
   return (
     <canvas

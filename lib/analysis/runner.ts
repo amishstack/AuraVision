@@ -563,10 +563,15 @@ export class DeepAnalysisRunner {
     const n = src[0].points.length;
     const out = new Float32Array(n * 3);
     let used = 0;
+    let wSum = 0;
     for (const cap of src) {
       const pts = cap.points;
       if (pts.length !== n) continue;
+      // Weighted merge: frontal views carry the subject's identifying
+      // structure most strongly; side views contribute depth/contour.
+      const w = Math.abs(cap.yaw) < 12 ? 2 : 1;
       used++;
+      wSum += w;
       let cx = 0, cz = 0;
       for (const p of pts) {
         cx += p.x;
@@ -579,13 +584,13 @@ export class DeepAnalysisRunner {
       for (let i = 0; i < n; i++) {
         const dx = pts[i].x - cx;
         const dz = pts[i].z - cz;
-        out[i * 3] += cos * dx + sin * dz;
-        out[i * 3 + 1] += pts[i].y;
-        out[i * 3 + 2] += -sin * dx + cos * dz;
+        out[i * 3] += w * (cos * dx + sin * dz);
+        out[i * 3 + 1] += w * pts[i].y;
+        out[i * 3 + 2] += w * (-sin * dx + cos * dz);
       }
     }
     if (used === 0) return null;
-    for (let i = 0; i < out.length; i++) out[i] /= used;
+    for (let i = 0; i < out.length; i++) out[i] /= wSum;
     let cy = 0, cx = 0, cz = 0;
     for (let i = 0; i < n; i++) {
       cx += out[i * 3];
