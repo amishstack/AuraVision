@@ -69,9 +69,12 @@ export class DirectorEngine {
   };
   private dynSum = { eye: 0, mouth: 0, energy: 0, smile: 0, n: 0 };
   private checks: Check[] = [];
-  // expression phase — short dwell after upstream checks pass
+  // expression phase — owns its own dwell; STABILITY can only complete
+  // after the expression phase completes (it's an ordered check, and the
+  // hold gate requires every check to pass)
   private exprStart = 0;
   private exprCalmSince = 0;
+  private exprSmileBase = 0;
 
   private buildChecks(): Check[] {
     const yawRange: [number, number] =
@@ -155,31 +158,40 @@ export class DirectorEngine {
     this.dynSum = { eye: 0, mouth: 0, energy: 0, smile: 0, n: 0 };
     this.exprStart = 0;
     this.exprCalmSince = 0;
+    this.exprSmileBase = 0;
   }
 
   // --- expression phase -------------------------------------------------
-  // Measures facial dynamics stability — not emotion. A calm, settled face
-  // (low motion energy) completes the phase in ~0.6s; jittery dynamics get
-  // RELAX YOUR FACE; a calm neutral face gets one time-boxed TRY A SUBTLE
-  // SMILE prompt; a raised smile blendshape reports EXPRESSION — SET.
-  // Graceful accept after EXPR_MAX_MS so the flow can never stall.
+  // Measures facial dynamics stability — not emotion. The phase owns its
+  // completion: a minimum dwell from phase start must elapse AND the face
+  // must be calm-settled (or a visible smile change detected) before the
+  // check passes. Graceful accept at EXPR_MAX_MS so the flow never stalls.
 
   private exprIdx(): number {
     return this.checks.findIndex((c) => c.id === "EXPR");
   }
 
+  /** True while the smile blendshape has visibly risen since phase start. */
+  private smileSet(d: FacialDynamics): boolean {
+    return d.smile >= Math.max(0.3, this.exprSmileBase + 0.18);
+  }
+
   private exprDone(now: number): boolean {
-    if (!this.lastInput?.dynamics) return false;
-    if (this.exprCalmSince && now - this.exprCalmSince >= 550) return true;
-    return this.exprStart > 0 && now - this.exprStart > 2200;
+    const dwell = now - this.exprStart;
+    if (this.exprStart === 0 || dwell < 0) return false;
+    const d = this.lastInput?.dynamics;
+    if (!d) return dwell > 2600;
+    if (this.smileSet(d) && dwell >= 500) return true;
+    const settled = this.exprCalmSince > 0 && now - this.exprCalmSince >= 550;
+    return (settled && dwell >= 1300) || dwell > 2600;
   }
 
   private exprInstruct(i: DirectorInput, now: number): string {
     const d = i.dynamics;
-    if (!d || d.energy > 0.4 || !this.exprCalmSince) return "RELAX YOUR FACE";
-    const smileMean = this.dynSum.n ? this.dynSum.smile / this.dynSum.n : 0;
-    if (d.smile >= 0.3 || smileMean >= 0.3) return "EXPRESSION — SET";
-    if (this.exprStart && now - this.exprStart < 1400) return "TRY A SUBTLE SMILE";
+    if (!d) return "RELAX YOUR FACE";
+    if (this.smileSet(d)) return "EXPRESSION — SET";
+    if (d.energy > 0.4 || !this.exprCalmSince) return "RELAX YOUR FACE";
+    if (now - this.exprStart < 1400) return "TRY A SUBTLE SMILE";
     return "EXPRESSION — NATURAL";
   }
 
@@ -226,7 +238,11 @@ export class DirectorEngine {
       ei > 0 &&
       this.checks.slice(0, ei).every((c) => c.test(input, now));
     if (upstreamOk) {
-      if (!this.exprStart) this.exprStart = now;
+      if (!this.exprStart) {
+        this.exprStart = now;
+        // baseline for detecting a visible expression *change*
+        this.exprSmileBase = input.dynamics?.smile ?? 0;
+      }
       const calm = (input.dynamics?.energy ?? 1) < 0.4;
       if (calm) {
         if (!this.exprCalmSince) this.exprCalmSince = now;
@@ -254,19 +270,26 @@ export class DirectorEngine {
     const input = this.lastInput;
     let instruction = inInit ? "DIRECTOR MODE" : "ACQUIRING FACE";
     let phase: DirectorUI["phase"] = "guide";
+    let exprProgress: number | null = null;
 
     if (input && input.facePresent && !inInit) {
       // first unsatisfied check drives the single instruction
-      let pending = false;
+      let pendingId: string | null = null;
       this.checks.forEach((c, idx) => {
-        const ok = pending ? false : c.test(input, now);
+        const ok = pendingId !== null ? false : c.test(input, now);
         doneFlags[idx].done = ok;
-        if (!ok && !pending) {
+        if (!ok && pendingId === null) {
           instruction = c.instruct(input, now);
-          pending = true;
+          pendingId = c.id;
         }
       });
-      if (!pending) {
+      if (pendingId === "EXPR") {
+        exprProgress = Math.min(
+          Math.max((now - this.exprStart) / 1300, 0),
+          1,
+        );
+      }
+      if (pendingId === null) {
         phase = "ready";
         instruction = "HOLD STILL";
       }
@@ -288,6 +311,7 @@ export class DirectorEngine {
       checks: doneFlags,
       composition,
       holdProgress: held,
+      exprProgress,
       waitSecs: this.firstBadAt && this.readySince === 0
         ? Math.floor((now - this.firstBadAt) / 1000)
         : 0,

@@ -49,6 +49,8 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
   const triangles = useMemo(() => faceTriangles(), []);
   const env = useRef(0);
   const lockBlend = useRef(0);
+  const funPrev = useRef(false);
+  const funBurstAt = useRef(0);
   const depthCache = useRef<Float32Array | null>(null);
   const depthStamp = useRef(0);
   // Adaptive detail — surface triangle stride relaxes if drawing is slow.
@@ -246,20 +248,40 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
         ctx.stroke();
       }
 
-      // --- FUN: landmark twinkle + slow scan arc -------------------------
+      // --- FUN: activation burst + ambient twinkle/scan arc --------------
+      if (funRef.current && !funPrev.current) {
+        funBurstAt.current = performance.now();
+      }
+      funPrev.current = funRef.current;
+      const burstT = funBurstAt.current
+        ? Math.min((performance.now() - funBurstAt.current) / 1100, 1)
+        : 1;
+
       if (funRef.current && e > 0.3) {
         const t = performance.now() * 0.001;
-        for (let i = 0; i < lm.length; i += 24) {
+        const burstBoost = 1 + (1 - burstT); // denser/brighter during burst
+        for (let i = 0; i < lm.length; i += burstT < 1 ? 12 : 24) {
           const tw = 0.5 + 0.5 * Math.sin(t * 2.4 + i * 1.7);
           if (tw < 0.55) continue;
           const [x, y] = px(lm[i]);
-          ctx.fillStyle = `rgba(${ACCENT}, ${0.4 * tw * e})`;
+          ctx.fillStyle = `rgba(${ACCENT}, ${Math.min(1, 0.4 * tw * e * burstBoost)})`;
           ctx.fillRect(x - dpr, y - dpr, 2 * dpr, 2 * dpr);
         }
         if (f.boundingBox) {
           const bb = f.boundingBox;
           const [bcx, bcy] = px({ x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 });
-          const r = Math.max(bb.w * dispW, bb.h * dispH) * 0.62;
+          const rBase = Math.max(bb.w * dispW, bb.h * dispH);
+          // activation signature: one cyan ring expands once around the
+          // face and fades; ambient arc keeps sweeping while FUN is on
+          if (burstT < 1) {
+            const rb = rBase * (0.35 + 1.15 * burstT);
+            ctx.strokeStyle = `rgba(${ACCENT}, ${(1 - burstT) * 0.55 * e})`;
+            ctx.lineWidth = 1.4 * dpr;
+            ctx.beginPath();
+            ctx.arc(bcx, bcy, rb, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          const r = rBase * 0.62;
           const a0 = t * 0.9;
           ctx.strokeStyle = `rgba(${ACCENT}, ${0.3 * e})`;
           ctx.lineWidth = dpr;

@@ -192,6 +192,8 @@ export interface DirectorUI {
   composition: "POOR" | "IMPROVING" | "GOOD" | "EXCELLENT";
   /** ready-hold progress 0..1 during final lock */
   holdProgress: number;
+  /** expression-phase dwell progress 0..1 while EXPR is the pending check */
+  exprProgress: number | null;
   /** seconds elapsed without a satisfying composition (for SKIP) */
   waitSecs: number;
 }

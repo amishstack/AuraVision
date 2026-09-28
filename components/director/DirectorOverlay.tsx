@@ -21,7 +21,13 @@ export default function DirectorOverlay({
   return (
     <>
       {/* primary instruction — top safe zone */}
-      <div className="absolute left-1/2 top-3 w-max max-w-[92vw] -translate-x-1/2 rounded bg-black/40 px-4 py-2 text-center font-mono backdrop-blur-[2px] sm:top-4">
+      <div
+        className={`absolute left-1/2 top-3 w-max max-w-[92vw] -translate-x-1/2 rounded bg-black/40 px-4 py-2 text-center font-mono backdrop-blur-[2px] sm:top-4 ${
+          fun && d.phase === "ready"
+            ? "border border-cyan-300/40 animate-pulse"
+            : ""
+        }`}
+      >
         {d.phase === "init" ? (
           <div className="text-[11px] font-medium tracking-[0.3em] text-neutral-200">
             DIRECTOR MODE
@@ -34,6 +40,14 @@ export default function DirectorOverlay({
             <div className="mt-1 text-[13px] font-medium tracking-[0.2em] text-neutral-100">
               {d.instruction}
             </div>
+            {d.exprProgress !== null && (
+              <div className="mx-auto mt-1.5 h-px w-24 bg-neutral-800">
+                <div
+                  className="h-px bg-cyan-300 transition-[width] duration-100"
+                  style={{ width: `${d.exprProgress * 100}%` }}
+                />
+              </div>
+            )}
           </>
         )}
         {fun && d.phase !== "init" && (
@@ -80,9 +94,9 @@ export default function DirectorOverlay({
 }
 
 function funCopy(instruction: string, phase: string): string {
-  if (phase === "ready") return "FRAME LOCKED.";
+  if (instruction === "PORTRAIT READY") return "THAT'S THE FRAME.";
+  if (phase === "ready") return "LOCKING IT IN.";
   if (instruction === "HOLD STILL") return "HOLD IT…";
-  if (instruction === "PORTRAIT READY") return "PORTRAIT ACQUIRED.";
   if (instruction === "LOOK AT CAMERA") return "EYES HERE.";
   if (instruction === "MOVE CLOSER") return "ALMOST THERE.";
   if (instruction === "MOVE BACK") return "GIVE IT ROOM.";
