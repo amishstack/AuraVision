@@ -57,6 +57,35 @@ deployed HTTPS URL — `getUserMedia` requires a secure context.
   render rate, and surface density auto-relaxes if drawing gets slow; the
   overlay stays smooth when inference slows
 
+## Deep Analysis (V4)
+
+A guided second experience (`DEEP ANALYSIS` button once tracking locks)
+that runs an 8-phase cinematic pass — geometry → symmetry → proportion →
+gaze → dynamics → lighting → camera angles → signature — and produces a
+**Visual Signature**:
+
+- **Visual Aesthetic — Experimental** composite (0–100) built from
+  measurable quantities: geometric symmetry, proportional ratios,
+  balance, framing, lighting. Explicitly not a beauty judgment.
+- **Geometric symmetry map** — mirrored-ghost comparison + deviation
+  field during the symmetry phase
+- **Proportional structure** — landmark ratios (eye spacing, thirds,
+  jaw/mouth) labeled BALANCED / MODERATE / VARIABLE
+- **Preferred view** — frontal / left-¾ / right-¾ by stability+framing
+- **Lighting report** — quality label + actionable suggestions
+- **Gaze signature** — direction proportions + stability
+- **Visual vibe** — deterministic playful descriptors (entertainment,
+  labeled as such)
+- **Visual palette** — dominant frame colors + warm/cool/contrast
+- **Camera ⇄ Geometry blend slider** — scrub between the live frame and
+  the reconstructed geometry
+- **Share** — native share API (image blob when supported, text
+  otherwise); nothing is uploaded
+- **Demo mode** — `DEMO` strips chrome for hand-the-phone demos
+
+All analysis runs client-side on already-computed landmarks — no extra
+inference.
+
 ## States
 
 ```

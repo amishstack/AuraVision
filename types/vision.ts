@@ -13,8 +13,8 @@ export type TrackingState =
   | "locked"        // sustained stable temporal lock
   | "occluded"      // face present but landmark quality degraded
   | "lost"          // face was tracked, recently disappeared
-  | "deep_scan"     // user-triggered multi-second analysis pass
-  | "complete"      // visual profile screen
+  | "analysis"      // guided Deep Analysis pass
+  | "complete"      // visual signature screen
   | "error";
 
 export type CameraError =
@@ -88,29 +88,67 @@ export interface BoundingBox {
   h: number;
 }
 
-export interface VisualProfile {
-  durationMs: number;
-  geometry: string;      // e.g. "FACIAL CONTOUR ACQUIRED"
-  stabilityPct: number;  // 0..100
-  stabilityLabel: string;
-  poseSpreadDeg: number;
-  gazeConfidencePct: number;
-  dynamicsEnergy: string; // LOW / MODERATE / HIGH
-  lighting: string;      // e.g. "LEFT-KEY DIRECTIONAL"
-  trackingQuality: string;
-  landmarkCount: number;
-  /** Multi-view merged canonical face points (x,y,z triples, centered,
-   *  normalized). Drives the Visual Signature turntable hero. */
-  signaturePoints: Float32Array | null;
-  signaturePointCount: number;
-  viewsCaptured: number;  // how many guided poses contributed
+/** Measurable proportion item — qualitative label, not a standard. */
+export interface ProportionItem {
+  name: string;
+  ratio: number;
+  label: "BALANCED" | "MODERATE" | "VARIABLE";
 }
 
-/** Guided Deep Scan phase descriptors shown in the UI checklist. */
+export interface LightingReport {
+  label: string;            // GOOD / MODERATE / LOW
+  detail: string;           // e.g. "LEFT-KEY DIRECTIONAL"
+  suggestions: string[];
+}
+
+export interface GazeSignature {
+  center: number; // 0..1 proportions
+  left: number;
+  right: number;
+  other: number;
+  stabilityLabel: string; // HIGH / MEDIUM / LOW
+}
+
+export interface PaletteReport {
+  colors: string[]; // hex strings, most dominant first
+  temperature: "WARM" | "COOL" | "NEUTRAL";
+  contrastLabel: "HIGH CONTRAST" | "LOW CONTRAST" | "BALANCED";
+}
+
+export interface AestheticReport {
+  /** EXPERIMENTAL VISUAL METRIC — composite 0..100. Not a beauty score. */
+  total: number;
+  symmetry: number;
+  proportion: number;
+  balance: number;
+  framing: number;
+  lighting: number;
+}
+
+export interface AnalysisReport {
+  aesthetic: AestheticReport;
+  symmetryPct: number;
+  symmetryLabel: "HIGH" | "MODERATE" | "VARIABLE";
+  proportions: ProportionItem[];
+  proportionLabel: "BALANCED" | "MODERATE" | "VARIABLE";
+  preferredView: string;   // FRONTAL / LEFT 3/4 / RIGHT 3/4
+  lighting: LightingReport;
+  gaze: GazeSignature;
+  dynamicsLabel: string;
+  vibe: string[];
+  palette: PaletteReport | null;
+  signaturePoints: Float32Array | null;
+  viewsCaptured: number;
+  landmarkCount: number;
+  secondFaceSeen: boolean;
+  compositionLabel: string | null;
+}
+
+/** Deep Analysis phase descriptors shown in the UI checklist. */
 export interface ScanPhaseUI {
   instruction: string;        // e.g. "LOOK FORWARD"
   checks: boolean[];          // per-phase completion
-  labels: string[];           // per-phase names: FRONTAL / LEFT / RIGHT / REF
+  labels: string[];           // per-phase names
 }
 
 /** Mutable per-frame store — written by the tracking loop, read by the
@@ -137,10 +175,12 @@ export interface TrackingFrame {
   initProgress: number;
   /** Edge contact / degraded-quality flag while a face is present. */
   occluded: boolean;
-  /** Deep Scan progress 0..1 while state === "deep_scan". */
+  /** Analysis progress 0..1 while state === "analysis". */
   scanProgress: number;
-  /** Guided scan UI info while deep_scan. */
+  /** Guided analysis UI info while analysis. */
   scan: ScanPhaseUI | null;
-  /** Latest visual profile (valid in "complete" state). */
-  profile: VisualProfile | null;
+  /** Symmetry field (per-landmark deviation 0..1) for the mirror ghost. */
+  symmetryField: Float32Array | null;
+  /** Latest analysis report (valid in "complete" state). */
+  report: AnalysisReport | null;
 }

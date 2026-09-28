@@ -275,6 +275,44 @@ export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
         }
       }
 
+      // --- symmetry analysis ghost (Deep Analysis phase 2) ---------------
+      if (f.symmetryField) {
+        // mirrored ghost: reflect landmarks about the face's mean-x axis
+        let axis = 0;
+        for (const p of lm) axis += p.x;
+        axis /= lm.length;
+        const mx = (p: { x: number; y: number }) =>
+          [offX + (mirror ? 1 - (2 * axis - p.x) : 2 * axis - p.x) * dispW,
+           offY + p.y * dispH] as const;
+        ctx.strokeStyle = `rgba(${WHITE}, 0.16 * e)`;
+        ctx.lineWidth = 0.8 * dpr;
+        ctx.beginPath();
+        for (const set of [MESH.faceOval, MESH.leftEye, MESH.rightEye, MESH.lips]) {
+          for (const ed of set) {
+            const a = lm[ed.start], b = lm[ed.end];
+            if (!a || !b) continue;
+            const [ax2, ay2] = mx(a);
+            const [bx2, by2] = mx(b);
+            ctx.moveTo(ax2, ay2);
+            ctx.lineTo(bx2, by2);
+          }
+        }
+        ctx.stroke();
+        // symmetry field: ticks where left/right geometry deviates
+        for (let i = 0; i < lm.length; i += 2) {
+          const dev = f.symmetryField[i] ?? 0;
+          if (dev < 0.35) continue;
+          const [x, y] = px(lm[i]);
+          const l = (2 + dev * 7) * dpr;
+          ctx.strokeStyle = `rgba(${ACCENT}, ${0.15 + 0.5 * dev})`;
+          ctx.lineWidth = dpr;
+          ctx.beginPath();
+          ctx.moveTo(x, y - l / 2);
+          ctx.lineTo(x, y + l / 2);
+          ctx.stroke();
+        }
+      }
+
       // --- landmark nodes during acquisition ------------------------------
       if (f.state === "detected" || f.state === "initializing") {
         ctx.fillStyle = `rgba(${WHITE}, ${0.55 * e * sNodes})`;
@@ -308,8 +346,8 @@ export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
         }
         ctx.stroke();
 
-        // --- deep-scan sweep line ----------------------------------------
-        if (f.state === "deep_scan") {
+        // --- deep-analysis sweep line ------------------------------------
+        if (f.state === "analysis") {
           const sy = by + bh * (0.1 + 0.8 * (f.scanProgress % 1));
           ctx.strokeStyle = `rgba(${ACCENT}, 0.35)`;
           ctx.lineWidth = 1 * dpr;

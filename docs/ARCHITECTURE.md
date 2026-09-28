@@ -145,15 +145,28 @@ stride (1→2→4) if drawing exceeds budget, so surface density degrades
 gracefully on slow devices. WebGL remains a legitimate future path; the
 seam is `FaceMeshOverlay`.
 
-## Guided Deep Scan (V3)
+## Guided Deep Scan / Deep Analysis (V3–V4)
 
-`GuidedScan` drives four pose phases (frontal → turn → opposite turn →
-reference frontal), each requiring ~0.8s of in-range pose with a 9s
-graceful timeout. Per-phase landmark captures are averaged, de-rotated by
-mean yaw into a canonical cloud, and merged across views — an honest
-multi-view approximation (pitch/roll alignment is approximate). The
-result feeds the Visual Signature turntable (`SignatureMesh`) plus the
-qualitative metric summary. No evaluative claims.
+`DeepAnalysisRunner` (`lib/analysis/`) drives an 8-phase pass:
+geometry → symmetry → proportion → gaze → dynamics → lighting →
+guided camera angles (frontal → turn → opposite → reference) → signature.
+Phase 6 reuses the pose-gated capture machinery: each view's landmarks
+are averaged, de-rotated by mean yaw into a canonical cloud, and merged —
+an honest multi-view approximation (pitch/roll alignment approximate).
+
+Analysis modules are pure functions over existing landmarks/metrics:
+
+- `symmetry.ts` — mirror-cloud nearest-point deviation → score + field
+- `proportions.ts` — landmark ratios vs. canonical-face ranges →
+  qualitative labels (not standards)
+- `palette.ts` — 32×20 frame histogram → dominant swatches + warm/cool
+- `vibe.ts` — deterministic descriptor scoring from observable metrics
+- `runner.ts` — phase orchestration, framing/balance/lighting sub-scores,
+  the EXPERIMENTAL aesthetic composite (weights: symmetry .25,
+  lighting .25, proportion .20, balance .15, framing .15), report build
+
+The composite is derived entirely from measurable quantities and is
+labeled experimental — it is not an objective appearance judgment.
 
 ## Privacy
 

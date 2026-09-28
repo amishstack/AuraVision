@@ -7,7 +7,7 @@ import { loadFaceLandmarker } from "@/lib/vision/faceLandmarker";
 import { LandmarkSmoother } from "@/lib/smoothing/landmarkSmoother";
 import { InferenceScheduler } from "@/lib/performance/scheduler";
 import { LightingAnalyzer } from "@/lib/lighting/lighting";
-import { GuidedScan } from "@/lib/scan/deepScan";
+import { DeepAnalysisRunner } from "@/lib/analysis/runner";
 import { estimateGaze } from "@/lib/gaze/gaze";
 import { measureDynamics, type BlendshapeSignals } from "@/lib/dynamics/dynamics";
 import { computeDepthField } from "@/lib/depth/depth";
@@ -48,7 +48,8 @@ export function createInitialFrame(): TrackingFrame {
     occluded: false,
     scanProgress: 0,
     scan: null,
-    profile: null,
+    symmetryField: null,
+    report: null,
   };
 }
 
@@ -99,7 +100,8 @@ export function useFaceTracking(
     const smoother = new LandmarkSmoother(1.2, 0.6);
     const scheduler = new InferenceScheduler();
     const lighting = new LightingAnalyzer(400);
-    const deepScan = new GuidedScan();
+    const analysis = new DeepAnalysisRunner();
+    let secondFaceCx: number | null = null;
 
     // gaze temporal smoothing + label hysteresis
     let gazeDx = 0, gazeDy = 0, gazeConf = 0;
@@ -175,35 +177,39 @@ export function useFaceTracking(
           if (scanRequested.current) {
             scanRequested.current = false;
             if (frame.state === "tracking" || frame.state === "locked") {
-              deepScan.begin(now);
-              setState("deep_scan", now);
+              analysis.begin(now);
+              setState("analysis", now);
             }
           }
-          if (frame.state === "deep_scan") {
-            frame.scanProgress = deepScan.progress(now);
-            frame.scan = deepScan.ui();
-            deepScan.sample({
+          if (frame.state === "analysis") {
+            frame.scanProgress = analysis.progress(now);
+            frame.scan = analysis.ui(now);
+            frame.symmetryField = analysis.symmetryFieldForRender();
+            analysis.sample({
               now,
               facePresent: frame.landmarks !== null,
               stability: frame.metrics.stability,
-              presence: presenceEma,
               landmarkCount: frame.metrics.landmarkCount,
               landmarks: frame.landmarks,
+              boundingBox: frame.boundingBox,
               pose: frame.pose,
               gaze: frame.gaze,
               dynamics: frame.dynamics,
               lighting: frame.lighting,
+              facesDetected: frame.metrics.facesDetected,
+              secondFaceCx,
             });
-            if (deepScan.isDone(now)) {
-              frame.profile = deepScan.finish();
+            if (analysis.isDone(now)) {
+              frame.report = analysis.finish(video);
               frame.scanProgress = 1;
               frame.scan = null;
+              frame.symmetryField = null;
               setState("complete", now);
             }
           }
           if (profileExit.current) {
             profileExit.current = false;
-            frame.profile = null;
+            frame.report = null;
             setState(
               frame.landmarks ? "tracking" : "searching",
               now,
@@ -238,7 +244,7 @@ export function useFaceTracking(
             frame.state === "tracking" ||
             frame.state === "locked" ||
             frame.state === "occluded" ||
-            frame.state === "deep_scan";
+            frame.state === "analysis";
           if (frame.state === "complete" || frame.state === "error") {
             // leave the profile / error state untouched
           } else if (frame.state !== "searching" && frame.state !== "lost") {
@@ -270,11 +276,15 @@ export function useFaceTracking(
       // Most prominent face when more than one is present.
       let best = 0;
       let bestArea = 0;
+      secondFaceCx = null;
       for (let i = 0; i < count; i++) {
         const a = faceArea(result.faceLandmarks[i] as Landmark[]);
+        const bb = boundingBoxOf(result.faceLandmarks[i] as Landmark[]);
         if (a > bestArea) {
           bestArea = a;
           best = i;
+        } else if (bb) {
+          secondFaceCx = bb.x + bb.w / 2;
         }
       }
 
@@ -388,7 +398,7 @@ export function useFaceTracking(
         case "occluded":
           if (!frame.occluded) setState("tracking", now);
           break;
-        case "deep_scan":
+        case "analysis":
           // handled in the rAF loop; keep scanning even if degraded
           break;
         default:

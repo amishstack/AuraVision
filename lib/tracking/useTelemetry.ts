@@ -26,7 +26,7 @@ export function useTelemetry(
         lighting: f.lighting ? { ...f.lighting } : null,
         depth: f.depth ? { ...f.depth } : null,
         boundingBox: f.boundingBox ? { ...f.boundingBox } : null,
-        profile: f.profile ? { ...f.profile } : null,
+        report: f.report ? { ...f.report } : null,
       });
     }, 1000 / hz);
     return () => clearInterval(id);

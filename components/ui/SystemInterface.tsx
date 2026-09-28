@@ -17,7 +17,7 @@ const STATE_LABEL: Record<TrackingState, string> = {
   locked: "GEOMETRY LOCKED",
   occluded: "PARTIAL OCCLUSION",
   lost: "TRACKING LOST",
-  deep_scan: "GEOMETRY ACQUISITION",
+  analysis: "DEEP ANALYSIS",
   complete: "VISUAL SIGNATURE",
   error: "SYSTEM HALTED",
 };
@@ -58,7 +58,7 @@ export default function SystemInterface({
     snap.state === "tracking" ||
     snap.state === "locked" ||
     snap.state === "occluded" ||
-    snap.state === "deep_scan";
+    snap.state === "analysis";
 
   return (
     <>
@@ -86,8 +86,8 @@ export default function SystemInterface({
         </div>
       </div>
 
-      {/* guided deep-scan — instruction + checklist */}
-      {snap.state === "deep_scan" && snap.scan && (
+      {/* guided deep-analysis — instruction + checklist */}
+      {snap.state === "analysis" && snap.scan && (
         <>
           <div className="absolute left-1/2 top-3 -translate-x-1/2 text-center sm:top-4 font-mono text-[10px] tracking-[0.25em]">
             <div className="text-neutral-200">{snap.scan.instruction}</div>
@@ -95,18 +95,20 @@ export default function SystemInterface({
               {Math.round(snap.scanProgress * 100)}%
             </div>
           </div>
-          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 font-mono text-[9px] tracking-[0.25em] sm:bottom-14">
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 font-mono text-[9px] tracking-[0.2em] sm:bottom-14">
             <div className="mb-1 text-center text-neutral-600">
-              GEOMETRY ACQUISITION
+              DEEP ANALYSIS
             </div>
-            <div className="flex gap-4">
+            <div className="flex max-w-[280px] flex-wrap justify-center gap-x-3 gap-y-0.5">
               {snap.scan.labels.map((lbl, i) => (
                 <span
                   key={lbl}
                   className={
                     snap.scan!.checks[i]
                       ? "text-neutral-200"
-                      : "text-neutral-600"
+                      : i === snap.scan!.checks.filter(Boolean).length
+                        ? "text-cyan-200/80"
+                        : "text-neutral-700"
                   }
                 >
                   {lbl}

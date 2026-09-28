@@ -13,6 +13,7 @@ export default function AuraVisionApp() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [session, setSession] = useState(0);
   const [debug, setDebug] = useState(false);
+  const [demo, setDemo] = useState(false);
   const [facing, setFacing] = useState<"user" | "environment">("user");
   const { frameRef, startDeepScan, exitProfile } = useFaceTracking(
     videoRef,
@@ -52,28 +53,44 @@ export default function AuraVisionApp() {
           {canScan && (
             <button
               onClick={startDeepScan}
-              className="font-mono text-[10px] tracking-[0.2em] text-neutral-300 transition-colors hover:text-cyan-200"
+              className={`font-mono tracking-[0.2em] transition-colors hover:text-cyan-200 ${
+                demo
+                  ? "rounded border border-neutral-600 px-4 py-2 text-[11px] text-neutral-100"
+                  : "text-[11px] text-neutral-200"
+              }`}
             >
-              DEEP SCAN
+              DEEP ANALYSIS
+            </button>
+          )}
+          {!demo && (
+            <button
+              onClick={() =>
+                setFacing((f) => (f === "user" ? "environment" : "user"))
+              }
+              className="font-mono text-[10px] tracking-[0.2em] text-neutral-600 transition-colors hover:text-neutral-300"
+              aria-label="Switch camera"
+            >
+              {mirrored ? "REAR CAM" : "FRONT CAM"}
             </button>
           )}
           <button
-            onClick={() =>
-              setFacing((f) => (f === "user" ? "environment" : "user"))
-            }
-            className="font-mono text-[10px] tracking-[0.2em] text-neutral-600 transition-colors hover:text-neutral-300"
-            aria-label="Switch camera"
-          >
-            {mirrored ? "REAR CAM" : "FRONT CAM"}
-          </button>
-          <button
-            onClick={() => setDebug((v) => !v)}
+            onClick={() => setDemo((v) => !v)}
             className={`font-mono text-[10px] tracking-[0.2em] transition-colors ${
-              debug ? "text-cyan-300" : "text-neutral-600 hover:text-neutral-400"
+              demo ? "text-cyan-300" : "text-neutral-600 hover:text-neutral-400"
             }`}
           >
-            DEBUG
+            {demo ? "EXIT DEMO" : "DEMO"}
           </button>
+          {!demo && (
+            <button
+              onClick={() => setDebug((v) => !v)}
+              className={`font-mono text-[10px] tracking-[0.2em] transition-colors ${
+                debug ? "text-cyan-300" : "text-neutral-600 hover:text-neutral-400"
+              }`}
+            >
+              DEBUG
+            </button>
+          )}
         </div>
       </header>
 
@@ -104,8 +121,13 @@ export default function AuraVisionApp() {
           )}
 
           {/* visual signature */}
-          {snap.state === "complete" && snap.profile && (
-            <VisualSignature profile={snap.profile} onClose={exitProfile} />
+          {snap.state === "complete" && snap.report && (
+            <VisualSignature
+              report={snap.report}
+              frame={frameRef}
+              videoRef={videoRef}
+              onClose={exitProfile}
+            />
           )}
 
           {/* error veil */}
@@ -123,12 +145,14 @@ export default function AuraVisionApp() {
       </div>
 
       {/* footer */}
-      <footer className="flex items-center justify-between px-4 pb-3 font-mono text-[10px] tracking-[0.2em] text-neutral-700 sm:px-6 sm:pb-4">
-        <span>MONOCULAR RGB — BROWSER-SIDE INFERENCE</span>
-        <span>
-          {snap.state === "locked" ? "GEOMETRY LOCK" : snap.state.toUpperCase()}
-        </span>
-      </footer>
+      {!demo && (
+        <footer className="flex items-center justify-between px-4 pb-3 font-mono text-[10px] tracking-[0.2em] text-neutral-700 sm:px-6 sm:pb-4">
+          <span>MONOCULAR RGB — BROWSER-SIDE INFERENCE</span>
+          <span>
+            {snap.state === "locked" ? "GEOMETRY LOCK" : snap.state.toUpperCase()}
+          </span>
+        </footer>
+      )}
     </main>
   );
 }
