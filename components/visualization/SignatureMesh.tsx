@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { projectTurntable, drawSignatureMesh } from "@/lib/visualization/meshRender";
+import {
+  projectTurntable,
+  drawSignatureMesh,
+  drawSilhouetteSweep,
+} from "@/lib/visualization/meshRender";
 import { extractEdges } from "@/lib/visualization/edgeExtract";
 import { regionBounds, type SourceRect } from "@/lib/vision/imageTransform";
 import type { Landmark } from "@/types/vision";
@@ -27,6 +31,48 @@ export interface SignatureReference {
   mirrored: boolean;
 }
 
+// cinematic turntable — monocular reconstruction is only confident near
+// frontal, so the orbit lives in a restrained ±15° envelope with eased
+// dwells; never a profile. Keyframes: [ms, degrees]
+const ORBIT_KEYS: readonly (readonly [number, number])[] = [
+  [0, 0],
+  [900, 0],      // front dwell
+  [2000, 15],    // → +15°
+  [2350, 15],    // dwell
+  [3250, 0],     // → front
+  [4350, -15],   // → -15°
+  [4700, -15],   // dwell
+  [5600, 0],     // → front
+  [6800, 0],     // hero dwell
+];
+const ORBIT_PERIOD = ORBIT_KEYS[ORBIT_KEYS.length - 1][0];
+
+function smoothstep(a: number, b: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+/** eased yaw in degrees at time t (ms) — loops the keyframe envelope */
+function turntableYawDeg(t: number): number {
+  const tt = t % ORBIT_PERIOD;
+  for (let i = 0; i < ORBIT_KEYS.length - 1; i++) {
+    const [t0, a0] = ORBIT_KEYS[i];
+    const [t1, a1] = ORBIT_KEYS[i + 1];
+    if (tt >= t0 && tt <= t1) {
+      return a0 + (a1 - a0) * smoothstep(t0, t1, tt);
+    }
+  }
+  return 0;
+}
+
+/** presentation confidence by |yaw| — 1.0 frontal → 0.75 at ±15° */
+function viewConfidence(yawDeg: number): number {
+  const a = Math.abs(yawDeg);
+  if (a <= 8) return 1;
+  if (a <= 12) return 1 - 0.1 * smoothstep(8, 12, a);
+  return 0.9 - 0.15 * smoothstep(12, 15, a);
+}
+
 export default function SignatureMesh({
   points,
   reference,
@@ -47,7 +93,12 @@ export default function SignatureMesh({
   const edgeRef = useRef<HTMLCanvasElement | null>(null);
   const refSrcRef = useRef<SourceRect | null>(null);
   const [refLoaded, setRefLoaded] = useState(0);
+  const debugLive = useRef(debug);
   const hasRef = !!reference;
+
+  useEffect(() => {
+    debugLive.current = debug;
+  }, [debug]);
 
   useEffect(() => {
     ptsRef.current = points;
@@ -141,7 +192,7 @@ export default function SignatureMesh({
     canvas.height = size * dpr;
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
-    const R = canvas.width * 0.45;
+    const R = canvas.width * 0.58; // hero scale — reconstruction is dominant
 
     let raf = 0;
     const t0 = performance.now();
@@ -151,12 +202,12 @@ export default function SignatureMesh({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (!pts || pts.length === 0) return;
       const t = (performance.now() - t0) / 1000;
+      const yawDeg = turntableYawDeg(t * 1000);
+      const conf = viewConfidence(yawDeg);
       const proj = projectTurntable(
         pts,
-        fun
-          ? Math.sin(t * 0.85) * 0.78 // livelier ±~45° orbit in FUN
-          : Math.sin(t * 0.55) * 0.66,
-        fun ? Math.sin(t * 0.31) * 0.14 : Math.sin(t * 0.22) * 0.10,
+        (yawDeg * Math.PI) / 180,
+        fun ? Math.sin(t * 0.31) * 0.12 : Math.sin(t * 0.22) * 0.09,
         cx,
         cy,
         R,
@@ -184,42 +235,56 @@ export default function SignatureMesh({
         const sy = my * (src.h / dh);
         const edge = edgeRef.current;
 
-        // 1. captured frame — faintest layer
+        // 1. captured frame — faintest contextual layer
         ctx.save();
-        ctx.globalAlpha = 0.1;
+        ctx.globalAlpha = 0.08;
         ctx.filter = "blur(2px)";
         ctx.drawImage(
           img,
           src.x - sx, src.y - sy, src.w + sx * 2, src.h + sy * 2,
           minX - mx, minY - my, dw + mx * 2, dh + my * 2,
         );
-        // 2. edge reference — real-image structure (glasses, brows,
-        // hairline) without showing a readable photograph
+        // 2. identity edge map — clipped to the face ellipse so
+        // background edges never compete with facial structure
         if (edge) {
           const k = edge.width / img.width;
           ctx.filter = "none";
-          ctx.globalAlpha = 0.17;
+          ctx.save();
+          ctx.beginPath();
+          ctx.ellipse(
+            minX + dw / 2,
+            minY + dh / 2,
+            (dw / 2) * 1.15,
+            (dh / 2) * 1.15,
+            0,
+            0,
+            Math.PI * 2,
+          );
+          ctx.clip();
+          ctx.globalAlpha = 0.24 * conf;
           ctx.drawImage(
             edge,
             (src.x - sx) * k, (src.y - sy) * k,
             (src.w + sx * 2) * k, (src.h + sy * 2) * k,
             minX - mx, minY - my, dw + mx * 2, dh + my * 2,
           );
+          ctx.restore();
         }
         ctx.restore();
       }
 
-      // 3. facial geometry — dominant layer; in FUN the feature
-      // contours breathe with a slow highlight sweep
+      // 3. facial geometry — dominant layer; interior thins at grazing
+      // angles (view confidence), in FUN feature contours sweep-brighter
       drawSignatureMesh(
         ctx,
         proj,
         dpr,
         fun ? (Math.sin(t * 1.9) + 1) / 2 : 0,
+        conf,
       );
-      // FUN pulse — brief glow ring on each orbit beat + sparse drifting
-      // particles around the reconstruction
+      // FUN — silhouette highlight sweep + pulse ring + sparse particles
       if (fun) {
+        drawSilhouetteSweep(ctx, proj, dpr, (t * 0.18) % 1);
         const beat = (Math.sin(t * 1.7) + 1) / 2;
         ctx.strokeStyle = `rgba(140,210,240,${0.05 + beat * 0.08})`;
         ctx.lineWidth = dpr;
@@ -234,6 +299,18 @@ export default function SignatureMesh({
           ctx.fillStyle = `rgba(140,210,240,${0.10 + 0.08 * Math.sin(t + i)})`;
           ctx.fillRect(x, y, dpr, dpr);
         }
+      }
+
+      // DEBUG — live orbit diagnostics (development only)
+      if (debugLive.current) {
+        ctx.fillStyle = "rgba(255, 120, 80, 0.85)";
+        ctx.font = `${8 * dpr}px monospace`;
+        ctx.textAlign = "left";
+        ctx.fillText(
+          `YAW ${yawDeg.toFixed(1)}°  CONF ${conf.toFixed(2)}`,
+          6 * dpr,
+          12 * dpr,
+        );
       }
     };
     raf = requestAnimationFrame(render);

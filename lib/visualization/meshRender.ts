@@ -144,20 +144,28 @@ export function drawSignatureMesh(
   dpr: number,
   /** optional 0..1 glow — FUN mode sweeps feature brightness with it */
   glow = 0,
+  /**
+   * view confidence 0..1 — monocular reconstruction is only reliable
+   * near frontal. Low confidence fades the interior scaffold/nodes;
+   * silhouette, features and nose stay at full strength.
+   */
+  conf = 1,
 ): void {
   const { sx, sy, sz, n } = proj;
   const w = regionWeights();
   const scaffold = sparseScaffold(8);
   const featBoost = 1 + glow * 0.5;
+  // interior detail thins as confidence drops — never the structure
+  const inner = 0.45 + 0.55 * conf;
 
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
 
-  // interior scaffold — faint structural web
-  drawEdges(ctx, proj, scaffold, ACCENT, 0.09, dpr * 0.7);
+  // interior scaffold — faint structural web, thinner at lower confidence
+  drawEdges(ctx, proj, scaffold, ACCENT, 0.09 * inner, dpr * 0.7);
 
   // secondary contours — medium topology (cheeks, nose-adjacent paths)
-  drawEdges(ctx, proj, MESH.contours, ACCENT, 0.22, dpr * 0.8);
+  drawEdges(ctx, proj, MESH.contours, ACCENT, 0.22 * inner, dpr * 0.8);
 
   // nose structure — strongest mid-face cue, kept readable while orbiting
   drawPolyline(ctx, proj, NOSE_RIDGE, WHITE, 0.62 * featBoost, dpr * 1.0);
@@ -178,13 +186,47 @@ export function drawSignatureMesh(
   drawEdges(ctx, proj, MESH.faceOval, WHITE, 0.78, dpr * 1.3);
 
   // nodes — weighted by facial region; depth (relative z) modulates both
-  // brightness and size so nearer structure reads forward
+  // brightness and size so nearer structure reads forward. Interior
+  // (low-weight) nodes fade first at grazing view angles.
   for (let i = 0; i < n; i++) {
     const rel = Math.max(0, Math.min(1, sz[i] * 0.5 + 0.5));
     const wi = w[i];
-    const a = wi * (0.10 + 0.5 * rel) * 0.9;
+    const depthA = wi >= 1 ? 1 : inner; // structure nodes stay bright
+    const a = wi * (0.10 + 0.5 * rel) * 0.9 * depthA;
     const s = dpr * (0.5 + 0.9 * wi) * (0.75 + 0.5 * rel);
     ctx.fillStyle = `rgba(${ACCENT}, ${a})`;
     ctx.fillRect(sx[i] - s / 2, sy[i] - s / 2, s, s);
+  }
+}
+
+/**
+ * FUN — a bright segment that travels along the silhouette contour.
+ * Presentation only; the geometry is untouched.
+ */
+export function drawSilhouetteSweep(
+  ctx: CanvasRenderingContext2D,
+  proj: Projection,
+  dpr: number,
+  phase: number, // 0..1 along the oval
+): void {
+  const { sx, sy, n } = proj;
+  const oval = MESH.faceOval;
+  const L = oval.length;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  for (let i = 0; i < L; i++) {
+    const e = oval[i];
+    if (e.start >= n || e.end >= n) continue;
+    // distance from the sweep window, wrapping around the loop
+    let d = Math.abs(i / L - phase);
+    if (d > 0.5) d = 1 - d;
+    const a = Math.exp(-d * d * 90) * 0.5;
+    if (a < 0.02) continue;
+    ctx.strokeStyle = `rgba(${ACCENT}, ${a})`;
+    ctx.lineWidth = dpr * 1.3;
+    ctx.beginPath();
+    ctx.moveTo(sx[e.start], sy[e.start]);
+    ctx.lineTo(sx[e.end], sy[e.end]);
+    ctx.stroke();
   }
 }

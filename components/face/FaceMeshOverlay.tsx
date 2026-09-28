@@ -213,10 +213,13 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
         }
       };
 
-      // FUN mode: breathing shimmer + cyan feature treatment
+      // FUN mode: breathing shimmer + cyan feature treatment.
+      // Pulse strength tracks real temporal stability — reactive, not
+      // constant.
       const isFun = funRef.current;
       const funAmp = isFun
-        ? 1 + 0.26 * Math.sin(performance.now() * 0.0022)
+        ? 1 + 0.30 * Math.sin(performance.now() * 0.0022) *
+            (0.6 + 0.4 * (f.metrics?.stability ?? 0.5))
         : 1;
       const featCol = isFun ? ACCENT : WHITE;
 
@@ -286,6 +289,59 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
           ctx.stroke();
         }
 
+        // eye-region highlight — a short bright segment slides along
+        // each eye contour loop
+        for (const set of [MESH.leftEye, MESH.rightEye]) {
+          const L = set.length;
+          const head = Math.floor((t * 9) % L);
+          for (let k = 0; k < 4; k++) {
+            const ed = set[(head + k) % L];
+            const A = lm[ed.start], B = lm[ed.end];
+            if (!A || !B) continue;
+            const [ax, ay] = px(A);
+            const [bx, by] = px(B);
+            ctx.strokeStyle = `rgba(${ACCENT}, ${0.4 * (1 - k / 4) * e})`;
+            ctx.lineWidth = 1.1 * dpr;
+            ctx.beginPath();
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(bx, by);
+            ctx.stroke();
+          }
+        }
+
+        // mouth pulse — lip outline brightens with real mouth dynamics
+        const mouth = f.dynamics?.mouthAperture ?? 0;
+        if (mouth > 0.12) {
+          ctx.strokeStyle = `rgba(${ACCENT}, ${Math.min(0.5, mouth * 0.9) * e})`;
+          ctx.lineWidth = 1.4 * dpr;
+          ctx.beginPath();
+          for (const ed of MESH.lips) {
+            const A = lm[ed.start], B = lm[ed.end];
+            if (!A || !B) continue;
+            const [ax, ay] = px(A);
+            const [bx, by] = px(B);
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(bx, by);
+          }
+          ctx.stroke();
+        }
+
+        // gaze marker — small indicator offset by the real gaze vector
+        if (f.gaze && f.gaze.confidence > 0.4 && f.boundingBox) {
+          const bb0 = f.boundingBox;
+          const [gcx, gcy] = px({
+            x: bb0.x + bb0.w / 2,
+            y: bb0.y + bb0.h / 2,
+          });
+          const gx = gcx + f.gaze.dx * 34 * dpr;
+          const gy = gcy + f.gaze.dy * 34 * dpr;
+          ctx.strokeStyle = `rgba(${ACCENT}, ${0.45 * e})`;
+          ctx.lineWidth = dpr;
+          ctx.beginPath();
+          ctx.arc(gx, gy, 3.2 * dpr, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
         // landmark twinkle
         for (let i = 0; i < lm.length; i += burstT < 1 ? 12 : 24) {
           const tw = 0.5 + 0.5 * Math.sin(t * 2.4 + i * 1.7);
@@ -311,14 +367,16 @@ export default function FaceMeshOverlay({ frame, videoRef, debug, fun = false }:
             ctx.stroke();
           }
 
-          // faint persistent orbit ring + slow sweep arc (~5s rotation)
-          const r = rBase * 0.62;
+          // faint persistent orbit ring + slow sweep arc (~5s
+          // rotation); ring radius responds gently to head yaw
+          const yawResp = 1 + Math.min(0.08, Math.abs(f.pose?.yawDeg ?? 0) * 0.002);
+          const r = rBase * 0.62 * yawResp;
           ctx.strokeStyle = `rgba(${ACCENT}, ${0.07 * e})`;
           ctx.lineWidth = dpr;
           ctx.beginPath();
           ctx.arc(bcx, bcy, r, 0, Math.PI * 2);
           ctx.stroke();
-          const a0 = t * 1.15;
+          const a0 = t * 1.15 + (f.pose?.yawDeg ?? 0) * 0.01;
           ctx.strokeStyle = `rgba(${ACCENT}, ${0.34 * e})`;
           ctx.beginPath();
           ctx.arc(bcx, bcy, r, a0, a0 + 0.9);
