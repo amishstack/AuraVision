@@ -86,6 +86,10 @@ function funCopy(instruction: string, phase: string): string {
   if (instruction === "LOOK AT CAMERA") return "EYES HERE.";
   if (instruction === "MOVE CLOSER") return "ALMOST THERE.";
   if (instruction === "MOVE BACK") return "GIVE IT ROOM.";
+  if (instruction === "TRY A SUBTLE SMILE") return "IF YOU FEEL LIKE IT.";
+  if (instruction === "RELAX YOUR FACE") return "EASY DOES IT.";
+  if (instruction === "EXPRESSION — SET") return "LOVE THAT.";
+  if (instruction === "EXPRESSION — NATURAL") return "NATURAL WORKS.";
   if (instruction === "ACQUIRING FACE") return "SCANNING…";
   return "WORKING THE ANGLE.";
 }

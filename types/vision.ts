@@ -215,6 +215,10 @@ export interface DirectorResult {
   lightingCoach: { before: string; after: string } | null;
   aura: string[];
   expression: {
+    /** visual dynamics descriptor — NATURAL / SUBTLE / DYNAMIC (no emotion labels) */
+    label: string;
+    /** how settled the expression was at capture — HIGH / MEDIUM / LOW */
+    stability: string;
     motion: string;
     eye: string;
     lip: string;

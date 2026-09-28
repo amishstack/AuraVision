@@ -34,8 +34,8 @@ export interface DirectorInput extends FrameScoreInput {
 
 interface Check {
   id: string;
-  test: (i: DirectorInput) => boolean;
-  instruct: (i: DirectorInput) => string;
+  test: (i: DirectorInput, now: number) => boolean;
+  instruct: (i: DirectorInput, now: number) => string;
 }
 
 const faceW = (bb: BoundingBox | null) => bb?.w ?? 0;
@@ -67,8 +67,11 @@ export class DirectorEngine {
   private scoreParts = {
     visibility: 0, lighting: 0, framing: 0, angle: 0, gaze: 0, steadiness: 0,
   };
-  private dynSum = { eye: 0, mouth: 0, energy: 0, n: 0 };
+  private dynSum = { eye: 0, mouth: 0, energy: 0, smile: 0, n: 0 };
   private checks: Check[] = [];
+  // expression phase — short dwell after upstream checks pass
+  private exprStart = 0;
+  private exprCalmSince = 0;
 
   private buildChecks(): Check[] {
     const yawRange: [number, number] =
@@ -123,6 +126,13 @@ export class DirectorEngine {
         },
       },
       {
+        // expression stability — landmark dynamics only, no emotion labels.
+        // Neutral is fully valid; the prompt is time-boxed and optional.
+        id: "EXPR",
+        test: (_i, now) => this.exprDone(now),
+        instruct: (i, now) => this.exprInstruct(i, now),
+      },
+      {
         id: "STABILITY",
         test: (i) => i.stability > 0.55,
         instruct: () => "HOLD STILL",
@@ -142,7 +152,35 @@ export class DirectorEngine {
     this.beforeLight = null;
     this.lastLight = null;
     this.score = 0;
-    this.dynSum = { eye: 0, mouth: 0, energy: 0, n: 0 };
+    this.dynSum = { eye: 0, mouth: 0, energy: 0, smile: 0, n: 0 };
+    this.exprStart = 0;
+    this.exprCalmSince = 0;
+  }
+
+  // --- expression phase -------------------------------------------------
+  // Measures facial dynamics stability — not emotion. A calm, settled face
+  // (low motion energy) completes the phase in ~0.6s; jittery dynamics get
+  // RELAX YOUR FACE; a calm neutral face gets one time-boxed TRY A SUBTLE
+  // SMILE prompt; a raised smile blendshape reports EXPRESSION — SET.
+  // Graceful accept after EXPR_MAX_MS so the flow can never stall.
+
+  private exprIdx(): number {
+    return this.checks.findIndex((c) => c.id === "EXPR");
+  }
+
+  private exprDone(now: number): boolean {
+    if (!this.lastInput?.dynamics) return false;
+    if (this.exprCalmSince && now - this.exprCalmSince >= 550) return true;
+    return this.exprStart > 0 && now - this.exprStart > 2200;
+  }
+
+  private exprInstruct(i: DirectorInput, now: number): string {
+    const d = i.dynamics;
+    if (!d || d.energy > 0.4 || !this.exprCalmSince) return "RELAX YOUR FACE";
+    const smileMean = this.dynSum.n ? this.dynSum.smile / this.dynSum.n : 0;
+    if (d.smile >= 0.3 || smileMean >= 0.3) return "EXPRESSION — SET";
+    if (this.exprStart && now - this.exprStart < 1400) return "TRY A SUBTLE SMILE";
+    return "EXPRESSION — NATURAL";
   }
 
   update(input: DirectorInput, now: number): void {
@@ -171,6 +209,7 @@ export class DirectorEngine {
       this.dynSum.eye += input.dynamics.eyeAperture;
       this.dynSum.mouth += input.dynamics.mouthAperture;
       this.dynSum.energy += input.dynamics.energy;
+      this.dynSum.smile += input.dynamics.smile;
       this.dynSum.n++;
     }
     if (input.facePresent && !input.occluded) {
@@ -179,8 +218,28 @@ export class DirectorEngine {
       this.scoreParts = s.parts;
     }
 
+    // expression phase bookkeeping — starts when all upstream checks pass,
+    // resets if any regresses; "calm" = low landmark-motion energy
+    const ei = this.exprIdx();
+    const upstreamOk =
+      input.facePresent &&
+      ei > 0 &&
+      this.checks.slice(0, ei).every((c) => c.test(input, now));
+    if (upstreamOk) {
+      if (!this.exprStart) this.exprStart = now;
+      const calm = (input.dynamics?.energy ?? 1) < 0.4;
+      if (calm) {
+        if (!this.exprCalmSince) this.exprCalmSince = now;
+      } else {
+        this.exprCalmSince = 0;
+      }
+    } else {
+      this.exprStart = 0;
+      this.exprCalmSince = 0;
+    }
+
     const allOk =
-      input.facePresent && this.checks.every((c) => c.test(input));
+      input.facePresent && this.checks.every((c) => c.test(input, now));
     if (allOk) {
       if (this.readySince === 0) this.readySince = now;
     } else {
@@ -200,10 +259,10 @@ export class DirectorEngine {
       // first unsatisfied check drives the single instruction
       let pending = false;
       this.checks.forEach((c, idx) => {
-        const ok = pending ? false : c.test(input);
+        const ok = pending ? false : c.test(input, now);
         doneFlags[idx].done = ok;
         if (!ok && !pending) {
-          instruction = c.instruct(input);
+          instruction = c.instruct(input, now);
           pending = true;
         }
       });
@@ -288,9 +347,16 @@ export class DirectorEngine {
     });
 
     const dn = Math.max(1, this.dynSum.n);
+    const smileMean = this.dynSum.smile / dn;
+    const energyMean = this.dynSum.energy / dn;
     const expression = this.dynSum.n
       ? {
-          motion: levelLabel(this.dynSum.energy / dn),
+          // visual dynamics labels — no emotional inference
+          label:
+            smileMean < 0.25 ? "NATURAL" : smileMean < 0.55 ? "SUBTLE" : "DYNAMIC",
+          stability:
+            energyMean < 0.12 ? "HIGH" : energyMean < 0.3 ? "MEDIUM" : "LOW",
+          motion: levelLabel(energyMean),
           eye: levelLabel(this.dynSum.eye / dn),
           lip: levelLabel(this.dynSum.mouth / dn),
         }

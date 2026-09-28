@@ -120,7 +120,8 @@ export default function SignatureMesh({
       }
 
       drawSignatureMesh(ctx, proj, dpr);
-      // FUN pulse — brief glow ring on each orbit beat
+      // FUN pulse — brief glow ring on each orbit beat + sparse drifting
+      // particles around the reconstruction
       if (fun) {
         const beat = (Math.sin(t * 1.7) + 1) / 2;
         ctx.strokeStyle = `rgba(140,210,240,${0.05 + beat * 0.08})`;
@@ -128,6 +129,14 @@ export default function SignatureMesh({
         ctx.beginPath();
         ctx.arc(cx, cy, R * (0.72 + beat * 0.06), 0, Math.PI * 2);
         ctx.stroke();
+        for (let i = 0; i < 14; i++) {
+          const ang = t * 0.25 + i * 0.449;
+          const rr = R * (0.62 + 0.3 * Math.sin(i * 2.1 + t * 0.4));
+          const x = cx + Math.cos(ang) * rr;
+          const y = cy + Math.sin(ang) * rr;
+          ctx.fillStyle = `rgba(140,210,240,${0.10 + 0.08 * Math.sin(t + i)})`;
+          ctx.fillRect(x, y, dpr, dpr);
+        }
       }
     };
     raf = requestAnimationFrame(render);

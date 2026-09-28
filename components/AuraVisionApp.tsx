@@ -44,6 +44,7 @@ export default function AuraVisionApp() {
   const [viewingSaved, setViewingSaved] = useState(false);
   const [viewingDirector, setViewingDirector] = useState(false);
   const [fun, setFun] = useState(false);
+  const [funFlash, setFunFlash] = useState(false);
   const [wasComplete, setWasComplete] = useState(false);
   if (snap.state === "complete" && !wasComplete) {
     setWasComplete(true);
@@ -154,9 +155,18 @@ export default function AuraVisionApp() {
           )}
           {!demo && (
             <button
-              onClick={() => setFun((v) => !v)}
+              onClick={() => {
+                if (!fun) {
+                  setFunFlash(true);
+                  window.setTimeout(() => setFunFlash(false), 1600);
+                }
+                setFun((v) => !v);
+              }}
+              aria-pressed={fun}
               className={`font-mono text-[10px] font-medium tracking-[0.2em] transition-colors ${
-                fun ? "text-cyan-300" : "text-neutral-600 hover:text-neutral-400"
+                fun
+                  ? "rounded border border-cyan-300/50 bg-cyan-300/10 px-2 py-1 text-cyan-300"
+                  : "text-neutral-600 hover:text-neutral-400"
               }`}
             >
               FUN
@@ -212,6 +222,13 @@ export default function AuraVisionApp() {
           {(snap.state === "searching" || snap.state === "boot") && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <div className="h-16 w-16 rounded-full border border-neutral-700/50" />
+            </div>
+          )}
+
+          {/* fun-mode activation flash — immediate toggle feedback */}
+          {funFlash && (
+            <div className="pointer-events-none absolute left-1/2 top-20 z-20 -translate-x-1/2 animate-[fadeIn_0.3s_ease-out] rounded border border-cyan-300/50 bg-black/70 px-3 py-1.5 font-mono text-[10px] font-medium tracking-[0.3em] text-cyan-200">
+              FUN MODE — ACTIVE
             </div>
           )}
 

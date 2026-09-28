@@ -108,10 +108,15 @@ export default function SystemInterface({
               ? initStageLabel(snap.initProgress)
               : STATE_LABEL[snap.state]}
           </span>
+          {fun && (
+            <span className="text-[8px] tracking-[0.2em] text-cyan-300">
+              FUN
+            </span>
+          )}
         </div>
-        {fun && snap.state === "locked" && (
+        {fun && (
           <div className="mt-0.5 text-[8px] tracking-[0.2em] text-cyan-200/70">
-            {FUN_LINES[funIdx % FUN_LINES.length]}
+            {hasFace ? FUN_LINES[funIdx % FUN_LINES.length] : "FUN MODE — ACTIVE"}
           </div>
         )}
       </div>

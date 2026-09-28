@@ -70,6 +70,11 @@ export default function DirectorResult({
         <div className="mt-1 text-[9px] tracking-[0.25em] text-neutral-500">
           OPTIMAL CAMERA COMPOSITION
         </div>
+        {fun && (
+          <div className="mt-1.5 text-[8px] tracking-[0.3em] text-cyan-200/70">
+            AURA ACQUIRED
+          </div>
+        )}
 
         {/* captured portrait — hero */}
         {result.frame && (
@@ -113,6 +118,14 @@ export default function DirectorResult({
           <div className="mt-4 w-full border-t border-neutral-800 pt-3">
             <div className="mb-2 text-[9px] tracking-[0.25em] text-neutral-500">
               EXPRESSION DYNAMICS
+            </div>
+            <div className="mb-3 flex justify-between text-[10px]">
+              <span className="text-neutral-500">EXPRESSION</span>
+              <span className="text-neutral-200">{result.expression.label}</span>
+            </div>
+            <div className="mb-3 flex justify-between text-[10px]">
+              <span className="text-neutral-500">EXPRESSION STABILITY</span>
+              <span className="text-neutral-200">{result.expression.stability}</span>
             </div>
             <div className="grid grid-cols-3 gap-3 text-[10px]">
               <Attr title="MOTION" value={result.expression.motion} />
