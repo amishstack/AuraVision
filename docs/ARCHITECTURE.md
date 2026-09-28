@@ -168,6 +168,20 @@ Analysis modules are pure functions over existing landmarks/metrics:
 The composite is derived entirely from measurable quantities and is
 labeled experimental — it is not an objective appearance judgment.
 
+## V5 layer
+
+- `lib/bestFrame/` — `scoring.ts` (normalized sub-scores) +
+  `bestFrame.ts` (BestFrameEngine: evaluates every 500ms while tracked,
+  keeps top-3 face-region JPEG thumbnails in memory, nothing uploaded)
+- `lib/analysis/presence.ts` — Visual Presence descriptors from
+  measurable signals; `aura.ts` — interpretive palette/motion descriptors
+- `lib/visualization/meshRender.ts` — shared turntable projection used by
+  `SignatureMesh` (live) and `artifact.ts` (static 1080×1440 share card)
+- `components/visualization/AuraField.tsx` — palette-tinted ambient field
+  anchored to signature-cloud points
+- `components/results/OptimalFrame.tsx` — captured frame + geometry
+  overlay toggle + qualitative breakdown
+
 ## Privacy
 
 All inference is on-device WASM. Frames never leave the browser; no

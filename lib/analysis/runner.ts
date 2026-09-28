@@ -2,6 +2,9 @@ import { computeSymmetry } from "@/lib/analysis/symmetry";
 import { measureProportions } from "@/lib/analysis/proportions";
 import { analyzePalette } from "@/lib/analysis/palette";
 import { deriveVibe } from "@/lib/analysis/vibe";
+import { derivePresence } from "@/lib/analysis/presence";
+import { deriveAura } from "@/lib/analysis/aura";
+import type { BestFrameCandidate } from "@/lib/bestFrame/bestFrame";
 import type {
   AnalysisReport,
   BoundingBox,
@@ -38,10 +41,23 @@ export const PHASE_LABELS = [
   "DYNAMICS",
   "LIGHTING",
   "ANGLES",
+  "FRAME",
   "SIGNATURE",
 ];
 
-const PHASE_MS = [1000, 900, 800, 1200, 1200, 700, 0, 700]; // 6 is pose-gated
+const PHASE_MS = [1000, 900, 800, 1200, 1200, 700, 0, 700, 700]; // 6 is pose-gated
+
+const PHASE_CAPTIONS = [
+  "ACQUIRING VISUAL FIELD",
+  "GENERATING SYMMETRY MAP",
+  "ANALYZING PROPORTIONAL STRUCTURE",
+  "CAPTURING GAZE SIGNATURE",
+  "SAMPLING TEMPORAL DYNAMICS",
+  "SAMPLING LIGHTING FIELD",
+  "", // angles — per-pose instructions
+  "EVALUATING FRAME CANDIDATES",
+  "GENERATING VISUAL SIGNATURE",
+];
 const FRONTAL_MAX_YAW = 14;
 const SIDE_MIN_YAW = 15;
 const ANGLE_HOLD_MS = 700;
@@ -98,6 +114,8 @@ export class DeepAnalysisRunner {
   private secondFaceFrames = 0;
   private totalFrames = 0;
   private secondFaceOffset = 0; // mean x offset of secondary face
+  private occludedFrames = 0;
+  private gazeAbsDxSum = 0;
 
   begin(now: number): void {
     this.phase = 0;
@@ -130,35 +148,30 @@ export class DeepAnalysisRunner {
     this.secondFaceFrames = 0;
     this.totalFrames = 0;
     this.secondFaceOffset = 0;
+    this.occludedFrames = 0;
+    this.gazeAbsDxSum = 0;
   }
 
   ui(now: number): ScanPhaseUI {
     const checks = PHASE_LABELS.map((_, i) => i < this.phase);
-    let instruction = "";
+    let instruction = PHASE_CAPTIONS[this.phase] ?? "";
     if (this.phase === 6) {
       instruction = ["LOOK FORWARD", "TURN LEFT OR RIGHT", "TURN THE OTHER WAY", "LOOK FORWARD"][this.subPhase] ?? "LOOK FORWARD";
-    } else if (this.phase >= 7) {
-      instruction = "GENERATING VISUAL SIGNATURE";
-    } else {
-      instruction = `ANALYZING ${PHASE_LABELS[this.phase]}`;
     }
     void now;
     return { instruction, checks, labels: PHASE_LABELS };
   }
 
   progress(now: number): number {
-    if (this.phase >= 7) {
-      return Math.min((now - this.phaseStart) / PHASE_MS[7], 1);
-    }
     if (this.phase === 6) {
-      return (6 + this.subPhase / 4) / 8;
+      return (6 + this.subPhase / 4) / 9;
     }
     const ms = PHASE_MS[this.phase] || 1;
-    return (this.phase + Math.min((now - this.phaseStart) / ms, 1)) / 8;
+    return (this.phase + Math.min((now - this.phaseStart) / ms, 1)) / 9;
   }
 
   isDone(now: number): boolean {
-    return this.phase === 7 && now - this.phaseStart >= PHASE_MS[7];
+    return this.phase === 8 && now - this.phaseStart >= PHASE_MS[8];
   }
 
   /** Current symmetry field for the overlay ghost (phase 1). */
@@ -183,11 +196,13 @@ export class DeepAnalysisRunner {
     gaze: GazeEstimate | null;
     dynamics: FacialDynamics | null;
     lighting: LightingInfo | null;
+    occluded: boolean;
     facesDetected: number;
     secondFaceCx: number | null;
   }): void {
     const { now } = input;
     this.totalFrames++;
+    if (input.occluded) this.occludedFrames++;
     if (input.facesDetected > 1) {
       this.secondFaceFrames++;
       if (input.secondFaceCx !== null) this.secondFaceOffset += input.secondFaceCx;
@@ -240,6 +255,7 @@ export class DeepAnalysisRunner {
         : "OTHER";
       this.gazeCounts[key]++;
       this.gazeConfSum += input.gaze.confidence;
+      this.gazeAbsDxSum += Math.abs(input.gaze.dx);
       this.gazeN++;
     } else if (this.phase === 4 && input.dynamics) {
       this.energySum += input.dynamics.energy;
@@ -334,7 +350,11 @@ export class DeepAnalysisRunner {
     this.phaseStart = now;
   }
 
-  finish(video: HTMLVideoElement | null): AnalysisReport {
+  finish(
+    video: HTMLVideoElement | null,
+    bestFrame: BestFrameCandidate | null,
+    candidatesEvaluated: number,
+  ): AnalysisReport {
     const symScore = this.symN ? Math.round(this.symSum / this.symN) : 0;
     const propScore = this.propScores.length
       ? Math.round(this.propScores.reduce((a, b) => a + b, 0) / this.propScores.length)
@@ -421,6 +441,34 @@ export class DeepAnalysisRunner {
       energy > 0.5 ? "HIGH MOTION" : energy > 0.2 ? "MODERATE MOTION" : "LOW MOTION";
 
     const palette = video ? analyzePalette(video) : null;
+
+    const occludedFraction = this.totalFrames
+      ? this.occludedFrames / this.totalFrames
+      : 0;
+    const gazeSpread = this.gazeN ? Math.min(this.gazeAbsDxSum / this.gazeN, 1) : 0;
+    const gazeConfMean = this.gazeN ? this.gazeConfSum / this.gazeN : 0;
+    const stabilityPct = this.stabN ? Math.round((this.stabSum / this.stabN) * 100) : 0;
+
+    const presenceRes = derivePresence({
+      stabilityPct,
+      symmetry: symScore,
+      contrast: lm?.contrast ?? 0.2,
+      lightingMean: lm?.mean ?? 0.5,
+      dynamicsEnergy: energy,
+      gazeStability: gazeConfMean,
+      framing,
+      occludedFraction,
+    });
+    const aura = deriveAura({
+      palette,
+      contrast: lm?.contrast ?? 0.2,
+      lightingDir: lm?.dirX ?? 0,
+      lightingMean: lm?.mean ?? 0.5,
+      dynamicsEnergy: energy,
+      gazeSpread,
+      symmetry: symScore,
+    });
+
     const vibe = deriveVibe({
       symmetry: symScore,
       lightingMean: lm?.mean ?? 0.5,
@@ -464,6 +512,31 @@ export class DeepAnalysisRunner {
       landmarkCount: this.landmarkMax,
       secondFaceSeen: secondSeen,
       compositionLabel,
+      presence: presenceRes.descriptors,
+      presenceBasis: presenceRes.basis,
+      aura,
+      bestFrame: bestFrame
+          ? {
+              image: bestFrame.image,
+              landmarks: bestFrame.landmarks,
+              crop: bestFrame.crop,
+              parts: {
+                lighting: Math.round(bestFrame.score.parts.lighting * 100),
+                framing: Math.round(bestFrame.score.parts.framing * 100),
+                angle: Math.round(bestFrame.score.parts.angle * 100),
+                visibility: Math.round(bestFrame.score.parts.visibility * 100),
+                gaze: Math.round(bestFrame.score.parts.gaze * 100),
+                steadiness: Math.round(bestFrame.score.parts.steadiness * 100),
+              },
+              angleLabel:
+                Math.abs(bestFrame.yawDeg) < 12
+                  ? "FRONTAL"
+                  : bestFrame.yawDeg < 0
+                    ? "LEFT 3/4"
+                    : "RIGHT 3/4",
+            }
+          : null,
+      candidatesEvaluated,
     };
   }
 

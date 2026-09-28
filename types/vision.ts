@@ -125,6 +125,22 @@ export interface AestheticReport {
   lighting: number;
 }
 
+export interface BestFrameResult {
+  /** small local JPEG data-URL of the face region */
+  image: string;
+  landmarks: Landmark[];
+  crop: { x: number; y: number; w: number; h: number };
+  parts: {
+    lighting: number;
+    framing: number;
+    angle: number;
+    visibility: number;
+    gaze: number;
+    steadiness: number;
+  };
+  angleLabel: string;
+}
+
 export interface AnalysisReport {
   aesthetic: AestheticReport;
   symmetryPct: number;
@@ -142,6 +158,12 @@ export interface AnalysisReport {
   landmarkCount: number;
   secondFaceSeen: boolean;
   compositionLabel: string | null;
+  /** V5 */
+  presence: string[];       // visual descriptors from measurable signals
+  presenceBasis: string[];  // the measurable basis per descriptor
+  aura: string[];           // interpretive visual descriptors
+  bestFrame: BestFrameResult | null;
+  candidatesEvaluated: number;
 }
 
 /** Deep Analysis phase descriptors shown in the UI checklist. */

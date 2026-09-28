@@ -1,16 +1,20 @@
 "use client";
 
-import { useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useState, type MutableRefObject } from "react";
 import SignatureMesh from "@/components/visualization/SignatureMesh";
+import AuraField from "@/components/visualization/AuraField";
 import CameraGeometryBlend from "@/components/visualization/CameraGeometryBlend";
+import OptimalFrame from "@/components/results/OptimalFrame";
+import { artifactBlob } from "@/lib/visualization/artifact";
 import type { AnalysisReport, TrackingFrame } from "@/types/vision";
 
 /**
- * Visual Signature — the Deep Analysis artifact. Rotating merged
- * geometry as hero, qualitative attributes, palette, vibe, blend slider,
- * native share. All values derived from real analysis; the aesthetic
- * composite is explicitly labeled experimental.
+ * Visual Signature (V5) — the Deep Analysis artifact.
+ * Hero reconstruction → presence → structural signature → gaze → palette
+ * → aura profile → optimal frame → camera⇄geometry → share.
+ * All values derived from real analysis; composites labeled experimental.
  */
+
 export default function VisualSignature({
   report,
   frame,
@@ -23,49 +27,40 @@ export default function VisualSignature({
   onClose: () => void;
 }) {
   const [showInfo, setShowInfo] = useState(false);
-  const cardRef = useRef<HTMLDivElement>(null);
+  const [sharing, setSharing] = useState(false);
 
   const share = async () => {
+    setSharing(true);
     try {
-      const canvas = cardRef.current?.querySelector("canvas");
+      const blob = await artifactBlob(report);
+      const file = blob
+        ? new File([blob], "auravision-signature.png", { type: "image/png" })
+        : null;
       if (
-        canvas &&
-        navigator.canShare &&
-        (await new Promise<boolean>((resolve) => {
-          canvas.toBlob(
-            (b) =>
-              resolve(!!b && navigator.canShare({ files: [new File([b], "s.png", { type: "image/png" })] })),
-            "image/png",
-          );
-        }))
+        file &&
+        navigator.canShare?.({ files: [file] })
       ) {
-        canvas.toBlob(async (b) => {
-          if (!b) return;
-          await navigator.share({
-            files: [new File([b], "auravision-signature.png", { type: "image/png" })],
-            title: "AuraVision",
-            text: "Visual Signature — monocular facial reconstruction",
-          });
-        }, "image/png");
-        return;
+        await navigator.share({
+          files: [file],
+          title: "AuraVision",
+          text: "Visual Signature — monocular facial reconstruction",
+        });
+      } else if (navigator.share) {
+        await navigator.share({
+          title: "AuraVision",
+          text: `VISUAL SIGNATURE — presence: ${report.presence.join(", ")} · aura: ${report.aura.join(", ")}`,
+        });
       }
-      await navigator.share({
-        title: "AuraVision",
-        text: `Visual Signature — experimental visual metric ${report.aesthetic.total} · ${report.vibe.join(" / ")}`,
-      });
     } catch {
-      // user cancelled or share unsupported — silent
+      // cancelled/unsupported — silent
+    } finally {
+      setSharing(false);
     }
   };
 
-  const a = report.aesthetic;
-
   return (
     <div className="absolute inset-0 z-10 overflow-y-auto bg-[#0b0d0e]/95 animate-[fadeIn_0.6s_ease-out]">
-      <div
-        ref={cardRef}
-        className="mx-auto flex min-h-full w-full max-w-sm flex-col items-center px-6 py-6 font-mono tracking-[0.15em]"
-      >
+      <div className="mx-auto flex min-h-full w-full max-w-sm flex-col items-center px-6 py-6 font-mono tracking-[0.15em]">
         <div className="text-[10px] tracking-[0.3em] text-neutral-600">
           AURAVISION
         </div>
@@ -76,141 +71,159 @@ export default function VisualSignature({
           MONOCULAR RGB — BROWSER-SIDE ANALYSIS
         </div>
 
-        {/* hero */}
-        <div className="my-5">
-          <SignatureMesh points={report.signaturePoints} size={230} />
-        </div>
+        {/* hero — aura field behind the reconstruction */}
+        <Section delay={0} className="my-5">
+          <div className="relative">
+            <div className="absolute inset-0 opacity-70">
+              <AuraField report={report} size={300} />
+            </div>
+            <SignatureMesh points={report.signaturePoints} size={300} />
+          </div>
+          <div className="mt-2 text-center text-[9px] leading-4 tracking-[0.25em] text-neutral-600">
+            MONOCULAR FACIAL RECONSTRUCTION
+            <br />
+            {report.landmarkCount} LANDMARKS · MULTI-VIEW · LOCAL ONLY
+          </div>
+        </Section>
 
-        {/* experimental aesthetic metric */}
-        <div className="w-full border-t border-neutral-800 pt-4">
+        {/* visual presence */}
+        <Section delay={80} className="w-full border-t border-neutral-800 pt-4">
+          <Header text="VISUAL PRESENCE" sub="EXPERIMENTAL INTERPRETATION" />
+          <div className="text-[15px] tracking-[0.3em] text-neutral-100">
+            {report.presence.join("  /  ")}
+          </div>
+          <div className="mt-1 text-[9px] tracking-normal text-neutral-600">
+            {report.presenceBasis.join(" · ")}
+          </div>
+        </Section>
+
+        {/* structural signature */}
+        <Section delay={160} className="w-full border-t border-neutral-800 pt-4">
           <button
             onClick={() => setShowInfo((v) => !v)}
             className="flex w-full items-baseline justify-between"
           >
-            <span className="text-[9px] tracking-[0.25em] text-neutral-600">
-              VISUAL AESTHETIC — EXPERIMENTAL ⓘ
-            </span>
-            <span className="text-2xl tracking-[0.1em] text-neutral-100 tabular-nums">
-              {a.total}
-            </span>
+            <Header text="STRUCTURAL SIGNATURE" sub="EXPERIMENTAL VISUAL METRIC ⓘ" />
+            <CountUp value={report.aesthetic.total} className="text-3xl text-neutral-100" />
           </button>
           {showInfo && (
             <p className="mt-2 text-[9px] leading-4 tracking-normal text-neutral-500">
-              Experimental visual-composition metric computed from measurable
-              image and geometry characteristics — symmetry, proportions,
-              framing, lighting. Not an objective measure of appearance.
+              Composite of measurable properties — symmetry, proportions,
+              balance, framing, lighting. Not an objective appearance judgment.
             </p>
           )}
-          <div className="mt-3 space-y-1 text-[10px]">
+          <div className="mt-3 space-y-1.5 text-[10px]">
             {(
               [
-                ["SYMMETRY", a.symmetry],
-                ["PROPORTION", a.proportion],
-                ["BALANCE", a.balance],
-                ["FRAMING", a.framing],
-                ["LIGHTING", a.lighting],
+                ["SYMMETRY", report.aesthetic.symmetry],
+                ["PROPORTION", report.aesthetic.proportion],
+                ["BALANCE", report.aesthetic.balance],
+                ["FRAMING", report.aesthetic.framing],
+                ["LIGHTING", report.aesthetic.lighting],
               ] as const
             ).map(([k, v]) => (
               <div key={k} className="flex items-center justify-between">
                 <span className="text-neutral-600">{k}</span>
                 <span className="flex items-center gap-2">
-                  <span className="h-px w-16 bg-neutral-800">
+                  <span className="h-px w-20 bg-neutral-800">
                     <span
-                      className="block h-px bg-neutral-400"
+                      className="block h-px bg-neutral-400 transition-[width] duration-700"
                       style={{ width: `${v}%` }}
                     />
                   </span>
-                  <span className="w-6 text-right text-neutral-300 tabular-nums">
-                    {v}
-                  </span>
+                  <CountUp value={v} className="w-6 text-right text-neutral-300" />
                 </span>
               </div>
             ))}
           </div>
-        </div>
+        </Section>
 
-        {/* attributes */}
-        <div className="mt-5 grid w-full grid-cols-2 gap-x-6 gap-y-4 text-[10px]">
-          <Attr title="SYMMETRY" value={report.symmetryLabel} />
-          <Attr title="PROPORTION" value={report.proportionLabel} />
-          <Attr
-            title="GAZE"
-            value={`${report.gaze.stabilityLabel} STABILITY`}
-          />
-          <Attr title="LIGHTING" value={report.lighting.label} />
-          <Attr title="PREFERRED VIEW" value={report.preferredView} />
-          <Attr title="DYNAMICS" value={report.dynamicsLabel} />
-        </div>
-
-        {report.compositionLabel && (
-          <div className="mt-4 w-full border-t border-neutral-800 pt-3 text-[9px] tracking-[0.2em] text-neutral-400">
-            COMPOSITIONAL — {report.compositionLabel}
+        {/* gaze signature */}
+        <Section delay={240} className="w-full border-t border-neutral-800 pt-4">
+          <Header text="GAZE SIGNATURE" />
+          <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
+            <Bar w={report.gaze.left} c="#8cd2f0" />
+            <Bar w={report.gaze.center} c="#e1e8f0" />
+            <Bar w={report.gaze.right} c="#6b8ea3" />
           </div>
-        )}
+          <div className="mt-1 flex justify-between text-[8px] tracking-[0.2em] text-neutral-600">
+            <span>LEFT {(report.gaze.left * 100).toFixed(0)}%</span>
+            <span>CENTER {(report.gaze.center * 100).toFixed(0)}%</span>
+            <span>RIGHT {(report.gaze.right * 100).toFixed(0)}%</span>
+          </div>
+          <div className="mt-2 text-[10px] text-neutral-400">
+            STABILITY — {report.gaze.stabilityLabel}
+          </div>
+        </Section>
 
         {/* palette */}
         {report.palette && (
-          <div className="mt-5 w-full border-t border-neutral-800 pt-4">
-            <div className="mb-2 text-[9px] tracking-[0.25em] text-neutral-600">
-              VISUAL PALETTE
-            </div>
-            <div className="flex items-center gap-2">
-              {report.palette.colors.map((c) => (
+          <Section delay={320} className="w-full border-t border-neutral-800 pt-4">
+            <Header text="VISUAL PALETTE" />
+            <div className="mt-2 flex items-center gap-2">
+              {report.palette.colors.map((c, i) => (
                 <span
                   key={c}
-                  className="h-5 w-5 rounded-sm border border-neutral-800"
-                  style={{ background: c }}
+                  className="h-6 w-6 rounded-sm border border-neutral-800 animate-[fadeIn_0.5s_ease-out]"
+                  style={{ background: c, animationDelay: `${i * 80}ms`, animationFillMode: "backwards" }}
                 />
               ))}
               <span className="ml-2 text-[9px] text-neutral-500">
                 {report.palette.temperature} · {report.palette.contrastLabel}
               </span>
             </div>
-          </div>
+          </Section>
         )}
 
-        {/* vibe */}
-        <div className="mt-5 w-full border-t border-neutral-800 pt-4">
-          <div className="mb-1 text-[9px] tracking-[0.25em] text-neutral-600">
-            VISUAL VIBE — PLAYFUL INTERPRETATION
+        {/* aura profile */}
+        <Section delay={400} className="w-full border-t border-neutral-800 pt-4">
+          <Header text="AURA PROFILE" sub="VISUAL INTERPRETATION" />
+          <div className="text-[14px] tracking-[0.3em] text-cyan-200/90">
+            {report.aura.join("  /  ")}
           </div>
-          <div className="text-[13px] tracking-[0.3em] text-neutral-200">
-            {report.vibe.join("  /  ")}
+          <div className="mt-1 text-[8px] tracking-normal text-neutral-600">
+            Experimental visual interpretation derived from camera-visible signals.
           </div>
-        </div>
+        </Section>
 
-        {/* lighting suggestions */}
-        {report.lighting.suggestions.length > 0 && (
-          <div className="mt-5 w-full border-t border-neutral-800 pt-4 text-[9px] leading-5 tracking-[0.2em] text-neutral-500">
-            {report.lighting.suggestions.map((s) => (
-              <div key={s}>→ {s}</div>
-            ))}
-          </div>
+        {/* optimal frame */}
+        {report.bestFrame && (
+          <Section delay={480} className="w-full border-t border-neutral-800 pt-4">
+            <OptimalFrame
+              best={report.bestFrame}
+              mirrored={frame.current.mirrored}
+            />
+            <div className="mt-2 text-[8px] tracking-[0.2em] text-neutral-600">
+              {report.candidatesEvaluated} CANDIDATES EVALUATED
+            </div>
+          </Section>
         )}
 
         {/* camera ⇄ geometry */}
-        <div className="mt-6 flex w-full flex-col items-center border-t border-neutral-800 pt-4">
-          <div className="mb-3 text-[9px] tracking-[0.25em] text-neutral-600">
+        <Section delay={560} className="w-full border-t border-neutral-800 pt-5">
+          <div className="mb-3 text-center text-[9px] tracking-[0.25em] text-neutral-600">
             CAMERA ⇄ GEOMETRY
           </div>
-          <CameraGeometryBlend frame={frame} videoRef={videoRef} size={200} />
+          <div className="flex justify-center">
+            <CameraGeometryBlend frame={frame} videoRef={videoRef} size={230} />
+          </div>
+        </Section>
+
+        <div className="mt-7 w-full border-t border-neutral-800 pt-3 text-center text-[9px] leading-5 tracking-[0.2em] text-neutral-600">
+          BROWSER-SIDE INFERENCE · LOCAL ONLY · NO FRAME UPLOAD
         </div>
 
-        <div className="mt-6 w-full border-t border-neutral-800 pt-3 text-center text-[9px] leading-5 tracking-[0.2em] text-neutral-600">
-          {report.landmarkCount} LANDMARKS · {report.viewsCaptured} VIEWS ·
-          LOCAL ONLY
-        </div>
-
-        <div className="mt-5 flex w-full gap-3 pb-4">
+        <div className="mt-5 flex w-full gap-3 pb-6">
           <button
             onClick={share}
-            className="flex-1 rounded border border-neutral-700 py-2.5 text-[11px] tracking-[0.25em] text-neutral-300 transition-colors hover:border-neutral-500 hover:text-white"
+            disabled={sharing}
+            className="min-h-11 flex-1 rounded border border-neutral-700 py-2.5 text-[11px] tracking-[0.25em] text-neutral-200 transition-colors hover:border-neutral-500 hover:text-white disabled:opacity-50"
           >
-            SHARE
+            {sharing ? "…" : "SHARE"}
           </button>
           <button
             onClick={onClose}
-            className="flex-1 rounded border border-neutral-700 py-2.5 text-[11px] tracking-[0.25em] text-neutral-300 transition-colors hover:border-neutral-500 hover:text-white"
+            className="min-h-11 flex-1 rounded border border-neutral-700 py-2.5 text-[11px] tracking-[0.25em] text-neutral-300 transition-colors hover:border-neutral-500 hover:text-white"
           >
             LIVE
           </button>
@@ -220,13 +233,70 @@ export default function VisualSignature({
   );
 }
 
-function Attr({ title, value }: { title: string; value: string }) {
+function Section({
+  children,
+  delay,
+  className = "",
+}: {
+  children: React.ReactNode;
+  delay: number;
+  className?: string;
+}) {
   return (
-    <div>
-      <div className="mb-0.5 text-[8px] tracking-[0.25em] text-neutral-600">
-        {title}
-      </div>
-      <div className="text-neutral-200">{value}</div>
+    <div
+      className={`animate-[fadeIn_0.5s_ease-out] ${className}`}
+      style={{ animationDelay: `${delay}ms`, animationFillMode: "backwards" }}
+    >
+      {children}
     </div>
   );
+}
+
+function Header({ text, sub }: { text: string; sub?: string }) {
+  return (
+    <div className="mb-2">
+      <div className="text-[9px] tracking-[0.25em] text-neutral-600">{text}</div>
+      {sub && (
+        <div className="mt-0.5 text-[8px] tracking-[0.2em] text-neutral-700">
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Bar({ w, c }: { w: number; c: string }) {
+  return (
+    <span
+      className="block h-full transition-[width] duration-700"
+      style={{ width: `${Math.max(0, Math.min(1, w)) * 100}%`, background: c }}
+    />
+  );
+}
+
+function CountUp({
+  value,
+  className = "",
+}: {
+  value: number;
+  className?: string;
+}) {
+  const [v, setV] = useState(() =>
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? value
+      : 0,
+  );
+  useEffect(() => {
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (t: number) => {
+      const p = Math.min((t - t0) / 700, 1);
+      setV(Math.round(value * (1 - Math.pow(1 - p, 3))));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <span className={`tabular-nums ${className}`}>{v}</span>;
 }

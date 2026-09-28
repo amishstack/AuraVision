@@ -8,6 +8,7 @@ import { LandmarkSmoother } from "@/lib/smoothing/landmarkSmoother";
 import { InferenceScheduler } from "@/lib/performance/scheduler";
 import { LightingAnalyzer } from "@/lib/lighting/lighting";
 import { DeepAnalysisRunner } from "@/lib/analysis/runner";
+import { BestFrameEngine } from "@/lib/bestFrame/bestFrame";
 import { estimateGaze } from "@/lib/gaze/gaze";
 import { measureDynamics, type BlendshapeSignals } from "@/lib/dynamics/dynamics";
 import { computeDepthField } from "@/lib/depth/depth";
@@ -101,6 +102,7 @@ export function useFaceTracking(
     const scheduler = new InferenceScheduler();
     const lighting = new LightingAnalyzer(400);
     const analysis = new DeepAnalysisRunner();
+    const bestFrames = new BestFrameEngine();
     let secondFaceCx: number | null = null;
 
     // gaze temporal smoothing + label hysteresis
@@ -173,11 +175,35 @@ export function useFaceTracking(
           // --- lighting (self-throttled) -------------------------------
           frame.lighting = lighting.update(video, now);
 
+          // --- best-frame evaluation (stable tracking only) ------------
+          if (
+            frame.state === "tracking" ||
+            frame.state === "locked" ||
+            frame.state === "analysis"
+          ) {
+            bestFrames.update(
+              video,
+              {
+                stability: frame.metrics.stability,
+                confidence: presenceEma,
+                occluded: frame.occluded,
+                pose: frame.pose,
+                gaze: frame.gaze,
+                lighting: frame.lighting,
+                boundingBox: frame.boundingBox,
+                landmarks: frame.landmarks,
+                mirrored: frame.mirrored,
+              },
+              now,
+            );
+          }
+
           // --- deep scan lifecycle -------------------------------------
           if (scanRequested.current) {
             scanRequested.current = false;
             if (frame.state === "tracking" || frame.state === "locked") {
               analysis.begin(now);
+              bestFrames.reset(); // recalibrate candidates for this pass
               setState("analysis", now);
             }
           }
@@ -198,9 +224,14 @@ export function useFaceTracking(
               lighting: frame.lighting,
               facesDetected: frame.metrics.facesDetected,
               secondFaceCx,
+              occluded: frame.occluded,
             });
             if (analysis.isDone(now)) {
-              frame.report = analysis.finish(video);
+              frame.report = analysis.finish(
+                video,
+                bestFrames.best(),
+                bestFrames.evaluatedCount(),
+              );
               frame.scanProgress = 1;
               frame.scan = null;
               frame.symmetryField = null;

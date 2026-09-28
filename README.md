@@ -86,6 +86,24 @@ gaze → dynamics → lighting → camera angles → signature — and produces 
 All analysis runs client-side on already-computed landmarks — no extra
 inference.
 
+## V5 — Visual Presence Lab
+
+- **Best Frame engine** (`lib/bestFrame/`) — continuously scores stable
+  frames on visibility / lighting / angle / framing / gaze / steadiness,
+  keeping top-3 as small local JPEG thumbnails (memory only)
+- **Optimal Frame** — captured frame on the result card with a geometry
+  overlay toggle and qualitative quality breakdown
+- **Visual Presence** — 3 descriptors from measurable signals
+  (stability, contrast, energy, framing) with the measurable basis shown
+- **Aura Profile** — 3 interpretive descriptors from palette/contrast/
+  lighting direction/motion/gaze distribution, explicitly labeled
+- **Aura Field** — ambient canvas behind the hero: palette-tinted arcs
+  and particles anchored to the reconstructed point cloud
+- **Result redesign** — larger turntable hero, staggered reveal, count-up
+  scores, gaze-signature distribution bar, per the artifact hierarchy
+- **Share artifact** — SHARE renders a 1080×1440 generated card (mesh +
+  scores + aura + palette; no camera imagery) via `navigator.share`
+
 ## States
 
 ```
