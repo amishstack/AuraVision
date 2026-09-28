@@ -108,13 +108,22 @@ export default function SignatureMesh({
           if (proj.sy[i] < minY) minY = proj.sy[i];
           if (proj.sy[i] > maxY) maxY = proj.sy[i];
         }
+        // ~8% margin so accessories (e.g. glasses rims) beyond the strict
+        // landmark bounds remain faintly visible behind the geometry —
+        // margin scaled into the source image's own pixel space
+        const dw = maxX - minX;
+        const dh = maxY - minY;
+        const mx = dw * 0.08;
+        const my = dh * 0.08;
+        const sx = mx * (src.w / dw);
+        const sy = my * (src.h / dh);
         ctx.save();
-        ctx.globalAlpha = 0.14;
+        ctx.globalAlpha = 0.12;
         ctx.filter = "blur(2px)";
         ctx.drawImage(
           img,
-          src.x, src.y, src.w, src.h,
-          minX, minY, maxX - minX, maxY - minY,
+          src.x - sx, src.y - sy, src.w + sx * 2, src.h + sy * 2,
+          minX - mx, minY - my, dw + mx * 2, dh + my * 2,
         );
         ctx.restore();
       }
