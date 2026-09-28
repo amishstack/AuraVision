@@ -61,13 +61,13 @@ export default function VisualSignature({
   return (
     <div className="absolute inset-0 z-10 overflow-y-auto bg-[#0b0d0e]/95 animate-[fadeIn_0.6s_ease-out]">
       <div className="mx-auto flex min-h-full w-full max-w-sm flex-col items-center px-6 py-6 font-mono tracking-[0.15em]">
-        <div className="text-[10px] tracking-[0.3em] text-neutral-600">
+        <div className="text-[10px] tracking-[0.3em] text-neutral-500">
           AURAVISION
         </div>
         <div className="mt-3 text-sm tracking-[0.35em] text-neutral-100">
           VISUAL SIGNATURE
         </div>
-        <div className="mt-1 text-[9px] tracking-[0.25em] text-neutral-600">
+        <div className="mt-1 text-[9px] tracking-[0.25em] text-neutral-500">
           MONOCULAR RGB — BROWSER-SIDE ANALYSIS
         </div>
 
@@ -79,7 +79,7 @@ export default function VisualSignature({
             </div>
             <SignatureMesh points={report.signaturePoints} size={300} />
           </div>
-          <div className="mt-2 text-center text-[9px] leading-4 tracking-[0.25em] text-neutral-600">
+          <div className="mt-2 text-center text-[9px] leading-4 tracking-[0.25em] text-neutral-500">
             MONOCULAR FACIAL RECONSTRUCTION
             <br />
             {report.landmarkCount} LANDMARKS · MULTI-VIEW · LOCAL ONLY
@@ -92,7 +92,7 @@ export default function VisualSignature({
           <div className="text-[15px] tracking-[0.3em] text-neutral-100">
             {report.presence.join("  /  ")}
           </div>
-          <div className="mt-1 text-[9px] tracking-normal text-neutral-600">
+          <div className="mt-1 text-[9px] tracking-normal text-neutral-500">
             {report.presenceBasis.join(" · ")}
           </div>
         </Section>
@@ -123,7 +123,7 @@ export default function VisualSignature({
               ] as const
             ).map(([k, v]) => (
               <div key={k} className="flex items-center justify-between">
-                <span className="text-neutral-600">{k}</span>
+                <span className="text-neutral-500">{k}</span>
                 <span className="flex items-center gap-2">
                   <span className="h-px w-20 bg-neutral-800">
                     <span
@@ -146,7 +146,7 @@ export default function VisualSignature({
             <Bar w={report.gaze.center} c="#e1e8f0" />
             <Bar w={report.gaze.right} c="#6b8ea3" />
           </div>
-          <div className="mt-1 flex justify-between text-[8px] tracking-[0.2em] text-neutral-600">
+          <div className="mt-1 flex justify-between text-[8px] tracking-[0.2em] text-neutral-500">
             <span>LEFT {(report.gaze.left * 100).toFixed(0)}%</span>
             <span>CENTER {(report.gaze.center * 100).toFixed(0)}%</span>
             <span>RIGHT {(report.gaze.right * 100).toFixed(0)}%</span>
@@ -181,7 +181,7 @@ export default function VisualSignature({
           <div className="text-[14px] tracking-[0.3em] text-cyan-200/90">
             {report.aura.join("  /  ")}
           </div>
-          <div className="mt-1 text-[8px] tracking-normal text-neutral-600">
+          <div className="mt-1 text-[8px] tracking-normal text-neutral-500">
             Experimental visual interpretation derived from camera-visible signals.
           </div>
         </Section>
@@ -193,7 +193,7 @@ export default function VisualSignature({
               best={report.bestFrame}
               mirrored={frame.current.mirrored}
             />
-            <div className="mt-2 text-[8px] tracking-[0.2em] text-neutral-600">
+            <div className="mt-2 text-[8px] tracking-[0.2em] text-neutral-500">
               {report.candidatesEvaluated} CANDIDATES EVALUATED
             </div>
           </Section>
@@ -201,7 +201,7 @@ export default function VisualSignature({
 
         {/* camera ⇄ geometry */}
         <Section delay={560} className="w-full border-t border-neutral-800 pt-5">
-          <div className="mb-3 text-center text-[9px] tracking-[0.25em] text-neutral-600">
+          <div className="mb-3 text-center text-[9px] tracking-[0.25em] text-neutral-500">
             CAMERA ⇄ GEOMETRY
           </div>
           <div className="flex justify-center">
@@ -209,7 +209,7 @@ export default function VisualSignature({
           </div>
         </Section>
 
-        <div className="mt-7 w-full border-t border-neutral-800 pt-3 text-center text-[9px] leading-5 tracking-[0.2em] text-neutral-600">
+        <div className="mt-7 w-full border-t border-neutral-800 pt-3 text-center text-[9px] leading-5 tracking-[0.2em] text-neutral-500">
           BROWSER-SIDE INFERENCE · LOCAL ONLY · NO FRAME UPLOAD
         </div>
 
@@ -255,9 +255,9 @@ function Section({
 function Header({ text, sub }: { text: string; sub?: string }) {
   return (
     <div className="mb-2">
-      <div className="text-[9px] tracking-[0.25em] text-neutral-600">{text}</div>
+      <div className="text-[9px] tracking-[0.25em] text-neutral-500">{text}</div>
       {sub && (
-        <div className="mt-0.5 text-[8px] tracking-[0.2em] text-neutral-700">
+        <div className="mt-0.5 text-[8px] tracking-[0.2em] text-neutral-600">
           {sub}
         </div>
       )}

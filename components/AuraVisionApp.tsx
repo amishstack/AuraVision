@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { AnalysisReport } from "@/types/vision";
 import { useFaceTracking } from "@/lib/tracking/useFaceTracking";
 import { useTelemetry } from "@/lib/tracking/useTelemetry";
 import CameraFeed from "@/components/camera/CameraFeed";
@@ -36,6 +37,37 @@ export default function AuraVisionApp() {
   const optimalImage = snap.optimalFrame?.image ?? null;
   const optimalLive = liveForImage !== null && liveForImage === optimalImage;
 
+  // --- session-lifetime analysis result --------------------------------
+  // Completed reports persist in memory until a new scan starts or the
+  // page is reloaded. Stored on the 'complete' state-transition only.
+  const [savedReport, setSavedReport] = useState<AnalysisReport | null>(null);
+  const [viewingSaved, setViewingSaved] = useState(false);
+  const [wasComplete, setWasComplete] = useState(false);
+  if (snap.state === "complete" && !wasComplete) {
+    setWasComplete(true);
+    if (snap.report) setSavedReport(snap.report);
+  } else if (snap.state !== "complete" && wasComplete) {
+    setWasComplete(false);
+  }
+
+  const showResult =
+    (snap.state === "complete" && snap.report) ||
+    (viewingSaved && savedReport);
+  const activeReport =
+    snap.state === "complete" && snap.report ? snap.report : savedReport;
+  const canViewResult =
+    !!savedReport && snap.state !== "complete" && !viewingSaved;
+
+  const closeResult = () => {
+    setViewingSaved(false);
+    if (snap.state === "complete") exitProfile();
+  };
+  const beginAnalysis = () => {
+    setSavedReport(null);
+    setViewingSaved(false);
+    startDeepScan();
+  };
+
   const isError = snap.state === "error";
   const mirrored = facing === "user";
   const canScan = snap.state === "tracking" || snap.state === "locked";
@@ -48,8 +80,8 @@ export default function AuraVisionApp() {
           <div className="font-mono text-xs tracking-[0.3em] text-neutral-300">
             AURAVISION
           </div>
-          <div className="mt-0.5 hidden font-mono text-[9px] tracking-[0.25em] text-neutral-600 sm:block">
-            LIVE VISUAL INTELLIGENCE
+          <div className="mt-0.5 hidden font-mono text-[9px] font-medium tracking-[0.25em] text-neutral-500 sm:block">
+            VISUAL PRESENCE LAB
           </div>
         </div>
         <div className="flex items-center gap-3 sm:gap-4">
@@ -58,14 +90,22 @@ export default function AuraVisionApp() {
           </span>
           {canScan && (
             <button
-              onClick={startDeepScan}
-              className={`font-mono tracking-[0.2em] transition-colors hover:text-cyan-200 ${
+              onClick={beginAnalysis}
+              className={`font-mono font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 ${
                 demo
                   ? "rounded border border-neutral-600 px-4 py-2 text-[11px] text-neutral-100"
                   : "text-[11px] text-neutral-200"
               }`}
             >
               DEEP ANALYSIS
+            </button>
+          )}
+          {canViewResult && (
+            <button
+              onClick={() => setViewingSaved(true)}
+              className="font-mono text-[10px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200"
+            >
+              RESULT
             </button>
           )}
           {!demo && (
@@ -165,13 +205,13 @@ export default function AuraVisionApp() {
             </div>
           )}
 
-          {/* visual signature */}
-          {snap.state === "complete" && snap.report && (
+          {/* visual signature — live result or saved session result */}
+          {showResult && activeReport && (
             <VisualSignature
-              report={snap.report}
+              report={activeReport}
               frame={frameRef}
               videoRef={videoRef}
-              onClose={exitProfile}
+              onClose={closeResult}
             />
           )}
 
@@ -191,7 +231,7 @@ export default function AuraVisionApp() {
 
       {/* footer */}
       {!demo && (
-        <footer className="flex items-center justify-between px-4 pb-3 font-mono text-[10px] tracking-[0.2em] text-neutral-700 sm:px-6 sm:pb-4">
+        <footer className="flex items-center justify-between px-4 pb-3 font-mono text-[10px] font-medium tracking-[0.12em] text-neutral-500 sm:px-6 sm:pb-4 sm:tracking-[0.2em]">
           <span>MONOCULAR RGB — BROWSER-SIDE INFERENCE</span>
           <span>
             {snap.state === "locked" ? "GEOMETRY LOCK" : snap.state.toUpperCase()}

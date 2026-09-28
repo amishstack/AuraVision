@@ -40,8 +40,12 @@ function Module({
   className?: string;
 }) {
   return (
-    <div className={`font-mono text-[10px] leading-4 tracking-[0.15em] ${className}`}>
-      <div className="mb-1 text-neutral-600">{title}</div>
+    <div
+      className={`rounded bg-black/35 px-2.5 py-1.5 font-mono text-[10px] font-medium leading-4 tracking-[0.12em] backdrop-blur-[2px] ${className}`}
+    >
+      <div className="mb-1 text-[8px] tracking-[0.2em] text-neutral-500">
+        {title}
+      </div>
       {children}
     </div>
   );
@@ -63,7 +67,7 @@ export default function SystemInterface({
   return (
     <>
       {/* status — top left inside viewport */}
-      <div className="absolute left-3 top-3 sm:left-4 sm:top-4 font-mono text-[10px] tracking-[0.2em]">
+      <div className="absolute left-3 top-3 rounded bg-black/35 px-2.5 py-1.5 font-mono text-[10px] font-medium tracking-[0.15em] backdrop-blur-[2px] sm:left-4 sm:top-4 sm:tracking-[0.2em]">
         <div className="flex items-center gap-2">
           <span
             className={`inline-block h-1.5 w-1.5 rounded-full ${
@@ -89,20 +93,20 @@ export default function SystemInterface({
       {/* guided deep-analysis — instruction + checklist */}
       {snap.state === "analysis" && snap.scan && (
         <>
-          <div className="absolute left-1/2 top-3 -translate-x-1/2 text-center sm:top-4 font-mono text-[10px] tracking-[0.25em]">
+          <div className="absolute left-1/2 top-3 w-max max-w-[92vw] -translate-x-1/2 rounded bg-black/35 px-3 py-1.5 text-center font-mono text-[10px] font-medium tracking-[0.15em] backdrop-blur-[2px] sm:top-4 sm:tracking-[0.25em]">
             <div className="text-neutral-200">{snap.scan.instruction}</div>
-            <div className="mt-1 text-neutral-600">
+            <div className="mt-1 text-[9px] text-neutral-500">
               {Math.round(snap.scanProgress * 100)}%
             </div>
             {/* FRAME phase — live candidate indicator */}
             {snap.scan.checks.filter(Boolean).length === 7 &&
               snap.frameCandidates.length > 0 && (
-                <div className="mt-3 animate-[fadeIn_0.3s_ease-out] text-[9px] tracking-[0.2em]">
-                  <div className="text-neutral-300">
+                <div className="mt-3 animate-[fadeIn_0.3s_ease-out] text-[9px] tracking-[0.15em]">
+                  <div className="font-medium text-neutral-200">
                     FRAME CANDIDATE{" "}
                     {String(snap.frameCandidateNo).padStart(2, "0")} / 12
                   </div>
-                  <div className="mt-0.5 text-[8px] text-neutral-600">
+                  <div className="mt-0.5 text-[8px] text-neutral-500">
                     BEST QUALITY {snap.bestFrameQuality}%
                   </div>
                   <div className="mt-1">
@@ -114,7 +118,7 @@ export default function SystemInterface({
                         NEW BEST FRAME
                       </span>
                     ) : (
-                      <span className="text-neutral-600">
+                      <span className="text-neutral-500">
                         BEST {snap.bestFrameQuality}%
                       </span>
                     )}
@@ -123,16 +127,16 @@ export default function SystemInterface({
               )}
           </div>
 
-          {/* candidate history strip */}
+          {/* candidate history strip — sits above the checklist panel */}
           {snap.frameCandidates.length > 0 && (
-            <div className="absolute bottom-[4.5rem] left-1/2 flex -translate-x-1/2 gap-1.5 sm:bottom-20">
+            <div className="absolute bottom-[7.25rem] left-1/2 flex -translate-x-1/2 gap-1.5 sm:bottom-32">
               {snap.frameCandidates.map((c, i) => (
                 <span
                   key={i}
-                  className={`border px-1.5 py-0.5 font-mono text-[8px] tracking-[0.1em] tabular-nums ${
+                  className={`border bg-black/40 px-1.5 py-0.5 font-mono text-[8px] tracking-[0.1em] tabular-nums backdrop-blur-[2px] ${
                     c.isBest
                       ? "border-cyan-300/60 text-cyan-200"
-                      : "border-neutral-800 text-neutral-600"
+                      : "border-neutral-700 text-neutral-400"
                   }`}
                 >
                   {c.quality}
@@ -140,20 +144,21 @@ export default function SystemInterface({
               ))}
             </div>
           )}
-          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 font-mono text-[9px] tracking-[0.2em] sm:bottom-14">
-            <div className="mb-1 text-center text-neutral-600">
+          {/* phase checklist — translucent panel anchored to the lower zone */}
+          <div className="absolute bottom-12 left-1/2 w-max max-w-[92vw] -translate-x-1/2 rounded bg-black/40 px-3 py-2 font-mono text-[9px] tracking-[0.12em] backdrop-blur-[2px] sm:bottom-14 sm:tracking-[0.2em]">
+            <div className="mb-1 text-center font-medium text-neutral-400">
               DEEP ANALYSIS
             </div>
-            <div className="flex max-w-[280px] flex-wrap justify-center gap-x-3 gap-y-0.5">
+            <div className="flex max-w-[300px] flex-wrap justify-center gap-x-3 gap-y-1">
               {snap.scan.labels.map((lbl, i) => (
                 <span
                   key={lbl}
                   className={
                     snap.scan!.checks[i]
-                      ? "text-neutral-200"
+                      ? "text-neutral-300"
                       : i === snap.scan!.checks.filter(Boolean).length
-                        ? "text-cyan-200/80"
-                        : "text-neutral-700"
+                        ? "text-cyan-200/90"
+                        : "text-neutral-600"
                   }
                 >
                   {lbl}
