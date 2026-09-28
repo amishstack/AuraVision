@@ -7,7 +7,7 @@ import CameraFeed from "@/components/camera/CameraFeed";
 import FaceMeshOverlay from "@/components/face/FaceMeshOverlay";
 import SystemInterface from "@/components/ui/SystemInterface";
 import DebugPanel from "@/components/ui/DebugPanel";
-import VisualProfile from "@/components/scan/VisualProfile";
+import VisualSignature from "@/components/scan/VisualSignature";
 
 export default function AuraVisionApp() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -103,9 +103,9 @@ export default function AuraVisionApp() {
             </div>
           )}
 
-          {/* visual profile */}
+          {/* visual signature */}
           {snap.state === "complete" && snap.profile && (
-            <VisualProfile profile={snap.profile} onClose={exitProfile} />
+            <VisualSignature profile={snap.profile} onClose={exitProfile} />
           )}
 
           {/* error veil */}

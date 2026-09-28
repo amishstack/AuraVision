@@ -37,17 +37,25 @@ deployed HTTPS URL — `getUserMedia` requires a secure context.
   with honest confidence (not precise eye tracking)
 - **Facial dynamics** — eye/mouth apertures, brow position, lip spread,
   temporal landmark-motion energy (descriptive, not emotional inference)
-- **Relative depth field** — landmark z normalized and used to modulate
-  scaffold intensity (relative depth, not a 3D scan)
+- **Pseudo-3D surface** — the MediaPipe tessellation recovered as ~930
+  triangles, painter-sorted by relative z and shaded by screen-space
+  normals; the surface reprojects naturally as the head turns
+- **Relative depth field** — landmark z normalized per frame, modulating
+  scaffold intensity and surface shading (relative depth, not a 3D scan)
 - **Illumination field** — coarse luminance / contrast / direction
   analysis of the incoming image
 - **Occlusion awareness** — degraded tracking detection; geometry fades
   rather than glitching, then recovers smoothly
-- **Deep Scan** — a 4-second temporal sampling pass that produces a
-  technical Visual Profile (geometry, stability, pose spread, gaze
-  confidence, lighting, tracking quality)
+- **Guided Deep Scan** — a directed multi-angle acquisition (forward →
+  turn → opposite turn → forward) whose per-view landmark captures are
+  de-rotated into a canonical cloud — honest multi-view geometry, not
+  metric reconstruction
+- **Visual Signature** — the Deep Scan artifact: a slow turntable render
+  of the merged geometry with a handful of qualitative attributes,
+  designed to be screenshot-worthy
 - **Adaptive performance** — inference rate is scheduled separately from
-  render rate; the overlay stays smooth when inference slows
+  render rate, and surface density auto-relaxes if drawing gets slow; the
+  overlay stays smooth when inference slows
 
 ## States
 

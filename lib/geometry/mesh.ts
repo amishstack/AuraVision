@@ -36,6 +36,41 @@ export function sparseScaffold(stride = 6): Connection[] {
   return out;
 }
 
+export type Triangle = readonly [number, number, number];
+
+/**
+ * Triangle list reconstructed once from the tessellation edge list.
+ * The edge constant lists each triangle's perimeter; we recover faces by
+ * finding closed 3-cliques in the undirected adjacency graph.
+ * Result: ~930 triangles covering the canonical face surface.
+ */
+let triCache: Triangle[] | null = null;
+export function faceTriangles(): Triangle[] {
+  if (triCache) return triCache;
+  const adj = new Map<number, Set<number>>();
+  const link = (u: number, v: number) => {
+    let s = adj.get(u);
+    if (!s) adj.set(u, (s = new Set()));
+    s.add(v);
+  };
+  for (const e of MESH.tesselation) {
+    link(e.start, e.end);
+    link(e.end, e.start);
+  }
+  const tris: Triangle[] = [];
+  for (const [a, sa] of adj) {
+    for (const b of sa) {
+      if (b <= a) continue;
+      const sb = adj.get(b)!;
+      for (const c of sa) {
+        if (c > b && sb.has(c)) tris.push([a, b, c]);
+      }
+    }
+  }
+  triCache = tris;
+  return tris;
+}
+
 export function boundingBoxOf(lm: Landmark[]): BoundingBox | null {
   if (lm.length === 0) return null;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

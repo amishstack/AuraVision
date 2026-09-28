@@ -134,12 +134,26 @@ and phone GPUs. A WebGL surface is a legitimate V3 option; the seam is
 - **Stability**: EMA of mean landmark displacement (12th-point subset).
 - **Occlusion**: bbox edge contact OR presence-EMA dip while face present.
 
-## Deep Scan
+## Pseudo-3D surface (V3)
 
-`DeepScanCollector` samples the frame store for 4s and distills:
-geometry completeness, mean stability %, pose spread (σ of yaw), gaze
-confidence %, dynamics energy, illumination label, tracking quality —
-rendered as a qualitative Visual Profile. No evaluative claims.
+`faceTriangles()` recovers ~930 triangles from the tessellation edge list
+(one-time clique search). Per frame, triangles are painter-sorted by mean
+relative z and filled with alpha scaled by screen-space normal facing +
+proximity — a translucent geometric surface that reprojects naturally as
+the head turns, on plain canvas 2D. A render-cost EMA relaxes triangle
+stride (1→2→4) if drawing exceeds budget, so surface density degrades
+gracefully on slow devices. WebGL remains a legitimate future path; the
+seam is `FaceMeshOverlay`.
+
+## Guided Deep Scan (V3)
+
+`GuidedScan` drives four pose phases (frontal → turn → opposite turn →
+reference frontal), each requiring ~0.8s of in-range pose with a 9s
+graceful timeout. Per-phase landmark captures are averaged, de-rotated by
+mean yaw into a canonical cloud, and merged across views — an honest
+multi-view approximation (pitch/roll alignment is approximate). The
+result feeds the Visual Signature turntable (`SignatureMesh`) plus the
+qualitative metric summary. No evaluative claims.
 
 ## Privacy
 

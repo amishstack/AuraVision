@@ -17,14 +17,16 @@ const STATE_LABEL: Record<TrackingState, string> = {
   locked: "GEOMETRY LOCKED",
   occluded: "PARTIAL OCCLUSION",
   lost: "TRACKING LOST",
-  deep_scan: "DEEP SCAN — SAMPLING",
-  complete: "VISUAL PROFILE",
+  deep_scan: "GEOMETRY ACQUISITION",
+  complete: "VISUAL SIGNATURE",
   error: "SYSTEM HALTED",
 };
 
 export function initStageLabel(p: number): string {
-  if (p < 0.3) return "LANDMARK FIELD — 478 POINTS";
-  if (p < 0.65) return "GEOMETRY SOLVED";
+  if (p < 0.2) return "LANDMARK FIELD — 478 POINTS";
+  if (p < 0.4) return "FACIAL TOPOLOGY — ACQUIRED";
+  if (p < 0.6) return "DEPTH FIELD — ESTABLISHED";
+  if (p < 0.85) return "GEOMETRY — SOLVED";
   return "TEMPORAL TRACK — ACQUIRING";
 }
 
@@ -84,11 +86,36 @@ export default function SystemInterface({
         </div>
       </div>
 
-      {/* deep-scan progress — top center */}
-      {snap.state === "deep_scan" && (
-        <div className="absolute left-1/2 top-3 -translate-x-1/2 sm:top-4 font-mono text-[10px] tracking-[0.25em] text-neutral-500">
-          {Math.round(snap.scanProgress * 100)}%
-        </div>
+      {/* guided deep-scan — instruction + checklist */}
+      {snap.state === "deep_scan" && snap.scan && (
+        <>
+          <div className="absolute left-1/2 top-3 -translate-x-1/2 text-center sm:top-4 font-mono text-[10px] tracking-[0.25em]">
+            <div className="text-neutral-200">{snap.scan.instruction}</div>
+            <div className="mt-1 text-neutral-600">
+              {Math.round(snap.scanProgress * 100)}%
+            </div>
+          </div>
+          <div className="absolute bottom-12 left-1/2 -translate-x-1/2 font-mono text-[9px] tracking-[0.25em] sm:bottom-14">
+            <div className="mb-1 text-center text-neutral-600">
+              GEOMETRY ACQUISITION
+            </div>
+            <div className="flex gap-4">
+              {snap.scan.labels.map((lbl, i) => (
+                <span
+                  key={lbl}
+                  className={
+                    snap.scan!.checks[i]
+                      ? "text-neutral-200"
+                      : "text-neutral-600"
+                  }
+                >
+                  {lbl}
+                  {snap.scan!.checks[i] ? " ✓" : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+        </>
       )}
 
       {/* pose + gaze modules — bottom edge, off the face */}

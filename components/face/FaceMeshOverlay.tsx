@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
-import { MESH, sparseScaffold } from "@/lib/geometry/mesh";
+import { MESH, sparseScaffold, faceTriangles } from "@/lib/geometry/mesh";
 import type { Connection } from "@/lib/geometry/mesh";
 import { computeDepthField } from "@/lib/depth/depth";
 import type { TrackingFrame } from "@/types/vision";
@@ -42,10 +42,15 @@ export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
     debugRef.current = debug;
   }, [debug]);
   const scaffold = useMemo(() => sparseScaffold(6), []);
+  const triangles = useMemo(() => faceTriangles(), []);
   const env = useRef(0);
   const lockBlend = useRef(0);
   const depthCache = useRef<Float32Array | null>(null);
   const depthStamp = useRef(0);
+  // Adaptive detail — surface triangle stride relaxes if drawing is slow.
+  const renderMsEma = useRef(0);
+  const triStride = useRef(1);
+  const triOrder = useRef<Uint32Array | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -113,9 +118,56 @@ export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
         depthCache.current = computeDepthField(lm)?.relative ?? null;
       }
       const depth = depthCache.current;
+      const drawStart = performance.now();
 
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
+
+      // --- L5 translucent pseudo-3D surface -----------------------------
+      // Painter-sorted triangles, shaded by screen-space normal facing
+      // and relative depth — reads as a faint geometric surface that
+      // reprojects naturally as the head turns.
+      if (sMesh > 0.4 && depth) {
+        const tris = triangles;
+        if (!triOrder.current || triOrder.current.length !== tris.length) {
+          triOrder.current = new Uint32Array(tris.length);
+          for (let i = 0; i < tris.length; i++) triOrder.current[i] = i;
+        }
+        const order = triOrder.current;
+        const zAvg = (i: number) =>
+          (depth[tris[i][0]] + depth[tris[i][1]] + depth[tris[i][2]]) / 3;
+        order.sort((a, b) => zAvg(b) - zAvg(a)); // far → near
+
+        const stride = triStride.current;
+        const baseA = (0.05 + 0.07 * lock) * e * sMesh;
+        for (let k = 0; k < tris.length; k += stride) {
+          const t = tris[order[k]];
+          const A = lm[t[0]], B = lm[t[1]], C = lm[t[2]];
+          if (!A || !B || !C) continue;
+          const [ax, ay] = px(A);
+          const [bx, by] = px(B);
+          const [cx, cy] = px(C);
+          // pseudo-3D: use -z*dispW as the third screen coordinate
+          const za = -A.z * dispW, zb = -B.z * dispW, zc = -C.z * dispW;
+          const ux = bx - ax, uy = by - ay, uz = zb - za;
+          const vx = cx - ax, vy = cy - ay, vz = zc - za;
+          const nz = ux * vy - uy * vx;
+          const nx = uy * vz - uz * vy;
+          const ny = uz * vx - ux * vz;
+          const nlen = Math.hypot(nx, ny, nz) || 1;
+          const facing = Math.max(0, nz / nlen);
+          const rel = (depth[t[0]] + depth[t[1]] + depth[t[2]]) / 3;
+          const alpha = baseA * (0.3 + 0.7 * facing) * (1.15 - 0.6 * rel);
+          if (alpha <= 0.004) continue;
+          ctx.fillStyle = `rgba(${ACCENT}, ${alpha})`;
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+          ctx.lineTo(cx, cy);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
 
       const drawEdges = (
         edges: Connection[], color: string, alpha: number, width: number,
@@ -268,6 +320,15 @@ export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
         }
       }
 
+      // adaptive detail: relax surface density if drawing is expensive
+      const drawMs = performance.now() - drawStart;
+      renderMsEma.current = renderMsEma.current * 0.9 + drawMs * 0.1;
+      if (renderMsEma.current > 7 && triStride.current < 4) {
+        triStride.current *= 2;
+      } else if (renderMsEma.current < 3 && triStride.current > 1) {
+        triStride.current = Math.max(1, triStride.current / 2);
+      }
+
       // --- debug layer ------------------------------------------------------
       if (debugRef.current && f.rawLandmarks) {
         ctx.fillStyle = "rgba(255, 120, 80, 0.8)";
@@ -288,7 +349,7 @@ export default function FaceMeshOverlay({ frame, videoRef, debug }: Props) {
     };
     raf = requestAnimationFrame(render);
     return () => cancelAnimationFrame(raf);
-  }, [frame, videoRef, scaffold]);
+  }, [frame, videoRef, scaffold, triangles]);
 
   return (
     <canvas

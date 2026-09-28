@@ -7,7 +7,7 @@ import { loadFaceLandmarker } from "@/lib/vision/faceLandmarker";
 import { LandmarkSmoother } from "@/lib/smoothing/landmarkSmoother";
 import { InferenceScheduler } from "@/lib/performance/scheduler";
 import { LightingAnalyzer } from "@/lib/lighting/lighting";
-import { DeepScanCollector } from "@/lib/scan/deepScan";
+import { GuidedScan } from "@/lib/scan/deepScan";
 import { estimateGaze } from "@/lib/gaze/gaze";
 import { measureDynamics, type BlendshapeSignals } from "@/lib/dynamics/dynamics";
 import { computeDepthField } from "@/lib/depth/depth";
@@ -47,13 +47,14 @@ export function createInitialFrame(): TrackingFrame {
     initProgress: 0,
     occluded: false,
     scanProgress: 0,
+    scan: null,
     profile: null,
   };
 }
 
 // Initialization-sequence pacing (seconds)
 const T_DETECTED = 0.45;
-const T_INIT = 1.9;
+const T_INIT = 2.0;
 const LOCK_FRAMES = 60;
 
 function extractBlendshapes(
@@ -98,7 +99,11 @@ export function useFaceTracking(
     const smoother = new LandmarkSmoother(1.2, 0.6);
     const scheduler = new InferenceScheduler();
     const lighting = new LightingAnalyzer(400);
-    const deepScan = new DeepScanCollector();
+    const deepScan = new GuidedScan();
+
+    // gaze temporal smoothing + label hysteresis
+    let gazeDx = 0, gazeDy = 0, gazeConf = 0;
+    let gazeLabel = "CENTER";
 
     let prevRaf = performance.now();
     let fpsEma = 0;
@@ -176,12 +181,14 @@ export function useFaceTracking(
           }
           if (frame.state === "deep_scan") {
             frame.scanProgress = deepScan.progress(now);
+            frame.scan = deepScan.ui();
             deepScan.sample({
               now,
               facePresent: frame.landmarks !== null,
               stability: frame.metrics.stability,
               presence: presenceEma,
               landmarkCount: frame.metrics.landmarkCount,
+              landmarks: frame.landmarks,
               pose: frame.pose,
               gaze: frame.gaze,
               dynamics: frame.dynamics,
@@ -190,6 +197,7 @@ export function useFaceTracking(
             if (deepScan.isDone(now)) {
               frame.profile = deepScan.finish();
               frame.scanProgress = 1;
+              frame.scan = null;
               setState("complete", now);
             }
           }
@@ -247,6 +255,10 @@ export function useFaceTracking(
           frame.depth = null;
           frame.boundingBox = null;
           frame.occluded = false;
+          gazeDx = 0;
+          gazeDy = 0;
+          gazeConf = 0;
+          gazeLabel = "CENTER";
           rawCache = null;
           smoother.reset();
           prevSmoothed = null;
@@ -296,7 +308,32 @@ export function useFaceTracking(
       const pose: HeadPose | null =
         mat && mat.length >= 12 ? poseFromMatrix(mat) : poseFromLandmarks(raw);
       frame.pose = pose;
-      frame.gaze = estimateGaze(smoothed, frame.mirrored);
+
+      // --- gaze: smooth the estimate + label hysteresis -----------------
+      const g = estimateGaze(smoothed, frame.mirrored);
+      if (g) {
+        gazeDx = ema(gazeDx, g.dx, 0.25);
+        gazeDy = ema(gazeDy, g.dy, 0.25);
+        gazeConf = ema(gazeConf, g.confidence, 0.2);
+        // Hysteresis: keep the previous label unless the new direction
+        // clearly dominates — prevents flicker near thresholds.
+        const nl = g.label;
+        if (nl !== gazeLabel) {
+          const strong =
+            nl === "LOW CONFIDENCE" ||
+            gazeConf < 0.35 ||
+            Math.max(Math.abs(gazeDx), Math.abs(gazeDy)) > 0.55;
+          if (strong || gazeLabel === "LOW CONFIDENCE") gazeLabel = nl;
+        }
+        frame.gaze = {
+          dx: gazeDx,
+          dy: gazeDy,
+          confidence: gazeConf,
+          label: gazeLabel as typeof g.label,
+        };
+      } else {
+        frame.gaze = null;
+      }
       frame.dynamics = measureDynamics(
         smoothed,
         extractBlendshapes(result, best),

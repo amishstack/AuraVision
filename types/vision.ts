@@ -99,6 +99,18 @@ export interface VisualProfile {
   lighting: string;      // e.g. "LEFT-KEY DIRECTIONAL"
   trackingQuality: string;
   landmarkCount: number;
+  /** Multi-view merged canonical face points (x,y,z triples, centered,
+   *  normalized). Drives the Visual Signature turntable hero. */
+  signaturePoints: Float32Array | null;
+  signaturePointCount: number;
+  viewsCaptured: number;  // how many guided poses contributed
+}
+
+/** Guided Deep Scan phase descriptors shown in the UI checklist. */
+export interface ScanPhaseUI {
+  instruction: string;        // e.g. "LOOK FORWARD"
+  checks: boolean[];          // per-phase completion
+  labels: string[];           // per-phase names: FRONTAL / LEFT / RIGHT / REF
 }
 
 /** Mutable per-frame store — written by the tracking loop, read by the
@@ -127,6 +139,8 @@ export interface TrackingFrame {
   occluded: boolean;
   /** Deep Scan progress 0..1 while state === "deep_scan". */
   scanProgress: number;
+  /** Guided scan UI info while deep_scan. */
+  scan: ScanPhaseUI | null;
   /** Latest visual profile (valid in "complete" state). */
   profile: VisualProfile | null;
 }
