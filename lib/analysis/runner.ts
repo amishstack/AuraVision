@@ -45,7 +45,9 @@ export const PHASE_LABELS = [
   "SIGNATURE",
 ];
 
-const PHASE_MS = [1000, 900, 800, 1200, 1200, 700, 0, 1600, 700]; // 6 is pose-gated
+const PHASE_MS = [1000, 900, 800, 1200, 1200, 700, 0, 4000, 700]; // 6 is pose-gated
+const FRAME_TARGET_CANDIDATES = 12;   // finalize at 12 candidates…
+const FRAME_MAX_MS = 4000;            // …or at 4s elapsed (hard timeout +1s below)
 
 const PHASE_CAPTIONS = [
   "ACQUIRING VISUAL FIELD",
@@ -116,6 +118,8 @@ export class DeepAnalysisRunner {
   private secondFaceOffset = 0; // mean x offset of secondary face
   private occludedFrames = 0;
   private gazeAbsDxSum = 0;
+  private candCount = 0;        // latest evaluated-candidate total
+  private framePhaseStart = -1; // candCount when FRAME phase began
 
   begin(now: number): void {
     this.phase = 0;
@@ -150,6 +154,14 @@ export class DeepAnalysisRunner {
     this.secondFaceOffset = 0;
     this.occludedFrames = 0;
     this.gazeAbsDxSum = 0;
+    this.candCount = 0;
+    this.framePhaseStart = -1;
+  }
+
+  /** Candidates evaluated during the FRAME phase specifically. */
+  phaseCandidates(): number {
+    if (this.phase !== 7 || this.framePhaseStart < 0) return 0;
+    return Math.max(0, this.candCount - this.framePhaseStart);
   }
 
   ui(now: number): ScanPhaseUI {
@@ -204,9 +216,11 @@ export class DeepAnalysisRunner {
     occluded: boolean;
     facesDetected: number;
     secondFaceCx: number | null;
+    candidatesEvaluated: number;
   }): void {
     const { now } = input;
     this.totalFrames++;
+    this.candCount = input.candidatesEvaluated;
     if (input.occluded) this.occludedFrames++;
     if (input.facesDetected > 1) {
       this.secondFaceFrames++;
@@ -271,8 +285,22 @@ export class DeepAnalysisRunner {
     }
 
     // --- phase advancement ---------------------------------------------
+    // Every phase has BOTH a normal completion and a bounded fallback —
+    // nothing in this pipeline may wait on a quality threshold.
     if (this.phase < 6 && now - this.phaseStart >= PHASE_MS[this.phase]) {
       this.advance(now);
+    } else if (this.phase === 7) {
+      if (this.framePhaseStart < 0) this.framePhaseStart = this.candCount;
+      const phaseCount = this.candCount - this.framePhaseStart;
+      const elapsed = now - this.phaseStart;
+      // primary: enough candidates OR max window — never quality-gated
+      if (phaseCount >= FRAME_TARGET_CANDIDATES || elapsed >= FRAME_MAX_MS) {
+        this.advance(now);
+      }
+      // defensive hard timeout (safety net, not the primary mechanism)
+      else if (elapsed > FRAME_MAX_MS + 1000) {
+        this.advance(now);
+      }
     }
   }
 

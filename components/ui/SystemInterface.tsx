@@ -100,9 +100,10 @@ export default function SystemInterface({
                 <div className="mt-3 animate-[fadeIn_0.3s_ease-out] text-[9px] tracking-[0.2em]">
                   <div className="text-neutral-300">
                     FRAME CANDIDATE{" "}
-                    {String(snap.frameCandidateNo).padStart(2, "0")}
-                    <span className="mx-2 text-neutral-700">·</span>
-                    QUALITY {snap.frameCandidates[snap.frameCandidates.length - 1].quality}%
+                    {String(snap.frameCandidateNo).padStart(2, "0")} / 12
+                  </div>
+                  <div className="mt-0.5 text-[8px] text-neutral-600">
+                    BEST QUALITY {snap.bestFrameQuality}%
                   </div>
                   <div className="mt-1">
                     {snap.frameCandidates[snap.frameCandidates.length - 1].isBest ? (

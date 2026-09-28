@@ -200,7 +200,7 @@ export function useFaceTracking(
                 mirrored: frame.mirrored,
               },
               now,
-              analysis.phaseIndex === 7 ? 250 : 500,
+              analysis.phaseIndex === 7 ? 300 : 500,
             );
           }
 
@@ -236,13 +236,17 @@ export function useFaceTracking(
               facesDetected: frame.metrics.facesDetected,
               secondFaceCx,
               occluded: frame.occluded,
+              candidatesEvaluated: bestFrames.evaluatedCount(),
             });
             // candidate strip UI state
             frame.frameCandidates = bestFrames.historyEntries().map((h) => ({
               quality: h.quality,
               isBest: h.isBest,
             }));
-            frame.frameCandidateNo = bestFrames.evaluatedCount();
+            frame.frameCandidateNo =
+              analysis.phaseIndex === 7
+                ? analysis.phaseCandidates()
+                : bestFrames.evaluatedCount();
             frame.bestFrameQuality = bestFrames.bestQualityPct();
             frame.newBestAt = bestFrames.lastNewBestAt();
             // freeze the selected frame once the FRAME phase completes
