@@ -104,6 +104,27 @@ inference.
 - **Share artifact** — SHARE renders a 1080×1440 generated card (mesh +
   scores + aura + palette; no camera imagery) via `navigator.share`
 
+## Director Mode (V6)
+
+`DIRECTOR` opens a guided portrait-composition flow — pick a target
+view (frontal / left-¾ / right-¾, defaulting to a prior scan's
+preferred view), then the system issues ONE instruction at a time
+(MOVE CLOSER, TURN SLIGHTLY LEFT, LOOK AT CAMERA, MOVE TOWARD LIGHT,
+HOLD STILL…) until composition is locked, holds ~1s, and captures the
+optimal frame via the existing BestFrameEngine.
+
+- Checks run in order (distance → framing → angle → gaze → lighting →
+  stability); satisfied conditions are skipped automatically
+- Portrait composition score reuses `scoreFrame` — qualitative
+  POOR/IMPROVING/GOOD/EXCELLENT unless DEBUG
+- Graceful exits: `CONTINUE ANYWAY` appears after 12s without a full
+  lock; completion never requires a perfect score
+- Result: optimal portrait + Portrait Readiness breakdown + lighting
+  coach (before/after, real measurements) + expression dynamics +
+  visual aura + a shareable 1080×1620 portrait card
+- Director results persist in session memory alongside Deep Analysis
+  results (RESULT / PORTRAIT header buttons)
+
 ## States
 
 ```

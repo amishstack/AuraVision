@@ -9,6 +9,8 @@ import { InferenceScheduler } from "@/lib/performance/scheduler";
 import { LightingAnalyzer } from "@/lib/lighting/lighting";
 import { DeepAnalysisRunner } from "@/lib/analysis/runner";
 import { BestFrameEngine, toBestFrameResult } from "@/lib/bestFrame/bestFrame";
+import { DirectorEngine } from "@/lib/director/director";
+import type { DirectorTarget } from "@/types/vision";
 import { estimateGaze } from "@/lib/gaze/gaze";
 import { measureDynamics, type BlendshapeSignals } from "@/lib/dynamics/dynamics";
 import { computeDepthField } from "@/lib/depth/depth";
@@ -55,6 +57,8 @@ export function createInitialFrame(): TrackingFrame {
     bestFrameQuality: 0,
     newBestAt: 0,
     optimalFrame: null,
+    director: null,
+    directorResult: null,
     report: null,
   };
 }
@@ -84,6 +88,10 @@ export interface TrackingControls {
   frameRef: MutableRefObject<TrackingFrame>;
   /** Request a Deep Scan — takes effect when tracking is stable. */
   startDeepScan: () => void;
+  /** Request Director Mode with a target view. */
+  startDirector: (target: DirectorTarget) => void;
+  /** Gracefully finish Director Mode with the best available frame. */
+  directorSkip: () => void;
   /** Leave the visual-profile screen, back to live tracking. */
   exitProfile: () => void;
 }
@@ -96,6 +104,9 @@ export function useFaceTracking(
   const frameRef = useRef<TrackingFrame>(createInitialFrame());
   const scanRequested = useRef(false);
   const profileExit = useRef(false);
+  const directorRequested = useRef(false);
+  const directorSkip = useRef(false);
+  const directorTarget = useRef<DirectorTarget>("frontal");
 
   useEffect(() => {
     Object.assign(frameRef.current, createInitialFrame());
@@ -108,6 +119,7 @@ export function useFaceTracking(
     const lighting = new LightingAnalyzer(400);
     const analysis = new DeepAnalysisRunner();
     const bestFrames = new BestFrameEngine();
+    const director = new DirectorEngine();
     let secondFaceCx: number | null = null;
 
     // gaze temporal smoothing + label hysteresis
@@ -184,7 +196,8 @@ export function useFaceTracking(
           if (
             frame.state === "tracking" ||
             frame.state === "locked" ||
-            frame.state === "analysis"
+            frame.state === "analysis" ||
+            frame.state === "director"
           ) {
             bestFrames.update(
               video,
@@ -266,9 +279,53 @@ export function useFaceTracking(
               setState("complete", now);
             }
           }
+          // --- director lifecycle (V6) ---------------------------------
+          if (directorRequested.current) {
+            directorRequested.current = false;
+            if (frame.state === "tracking" || frame.state === "locked") {
+              director.begin(now, directorTarget.current);
+              bestFrames.reset();
+              frame.optimalFrame = null;
+              frame.directorResult = null;
+              frame.report = null;
+              setState("director", now);
+            }
+          }
+          if (frame.state === "director") {
+            if (directorSkip.current) {
+              directorSkip.current = false;
+              director.forceFinish();
+            }
+            director.update(
+              {
+                facePresent: frame.landmarks !== null,
+                stability: frame.metrics.stability,
+                confidence: presenceEma,
+                occluded: frame.occluded,
+                pose: frame.pose,
+                gaze: frame.gaze,
+                lighting: frame.lighting,
+                boundingBox: frame.boundingBox,
+                landmarks: frame.landmarks,
+                dynamics: frame.dynamics,
+              },
+              now,
+            );
+            frame.director = director.ui(now);
+            if (director.isComplete(now)) {
+              frame.directorResult = director.finish(video, bestFrames.best());
+              const best = bestFrames.best();
+              if (best) frame.optimalFrame = toBestFrameResult(best);
+              frame.director = null;
+              setState("complete", now);
+            }
+          } else {
+            frame.director = null;
+          }
           if (profileExit.current) {
             profileExit.current = false;
             frame.report = null;
+            frame.directorResult = null;
             setState(
               frame.landmarks ? "tracking" : "searching",
               now,
@@ -303,7 +360,8 @@ export function useFaceTracking(
             frame.state === "tracking" ||
             frame.state === "locked" ||
             frame.state === "occluded" ||
-            frame.state === "analysis";
+            frame.state === "analysis" ||
+            frame.state === "director";
           if (frame.state === "complete" || frame.state === "error") {
             // leave the profile / error state untouched
           } else if (frame.state !== "searching" && frame.state !== "lost") {
@@ -458,6 +516,7 @@ export function useFaceTracking(
           if (!frame.occluded) setState("tracking", now);
           break;
         case "analysis":
+        case "director":
           // handled in the rAF loop; keep scanning even if degraded
           break;
         default:
@@ -479,6 +538,13 @@ export function useFaceTracking(
     frameRef,
     startDeepScan: () => {
       scanRequested.current = true;
+    },
+    startDirector: (target: DirectorTarget) => {
+      directorTarget.current = target;
+      directorRequested.current = true;
+    },
+    directorSkip: () => {
+      directorSkip.current = true;
     },
     exitProfile: () => {
       profileExit.current = true;

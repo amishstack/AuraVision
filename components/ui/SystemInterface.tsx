@@ -18,6 +18,7 @@ const STATE_LABEL: Record<TrackingState, string> = {
   occluded: "PARTIAL OCCLUSION",
   lost: "TRACKING LOST",
   analysis: "DEEP ANALYSIS",
+  director: "DIRECTOR MODE",
   complete: "VISUAL SIGNATURE",
   error: "SYSTEM HALTED",
 };
@@ -62,7 +63,8 @@ export default function SystemInterface({
     snap.state === "tracking" ||
     snap.state === "locked" ||
     snap.state === "occluded" ||
-    snap.state === "analysis";
+    snap.state === "analysis" ||
+    snap.state === "director";
 
   return (
     <>

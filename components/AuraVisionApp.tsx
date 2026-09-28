@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { AnalysisReport } from "@/types/vision";
+import type { AnalysisReport, DirectorResult as DirectorResultT, DirectorTarget } from "@/types/vision";
 import { useFaceTracking } from "@/lib/tracking/useFaceTracking";
 import { useTelemetry } from "@/lib/tracking/useTelemetry";
 import CameraFeed from "@/components/camera/CameraFeed";
@@ -9,6 +9,8 @@ import FaceMeshOverlay from "@/components/face/FaceMeshOverlay";
 import SystemInterface from "@/components/ui/SystemInterface";
 import DebugPanel from "@/components/ui/DebugPanel";
 import VisualSignature from "@/components/scan/VisualSignature";
+import DirectorOverlay from "@/components/director/DirectorOverlay";
+import DirectorResult from "@/components/results/DirectorResult";
 
 export default function AuraVisionApp() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -18,11 +20,8 @@ export default function AuraVisionApp() {
   // live-view override — reset automatically when a new optimal frame arrives
   const [liveForImage, setLiveForImage] = useState<string | null>(null);
   const [facing, setFacing] = useState<"user" | "environment">("user");
-  const { frameRef, startDeepScan, exitProfile } = useFaceTracking(
-    videoRef,
-    session,
-    facing,
-  );
+  const { frameRef, startDeepScan, startDirector, directorSkip, exitProfile } =
+    useFaceTracking(videoRef, session, facing);
   const snap = useTelemetry(frameRef);
 
   useEffect(() => {
@@ -41,32 +40,66 @@ export default function AuraVisionApp() {
   // Completed reports persist in memory until a new scan starts or the
   // page is reloaded. Stored on the 'complete' state-transition only.
   const [savedReport, setSavedReport] = useState<AnalysisReport | null>(null);
+  const [savedDirector, setSavedDirector] = useState<DirectorResultT | null>(null);
   const [viewingSaved, setViewingSaved] = useState(false);
+  const [viewingDirector, setViewingDirector] = useState(false);
+  const [directorPicker, setDirectorPicker] = useState(false);
+  const [fun, setFun] = useState(false);
   const [wasComplete, setWasComplete] = useState(false);
   if (snap.state === "complete" && !wasComplete) {
     setWasComplete(true);
     if (snap.report) setSavedReport(snap.report);
+    if (snap.directorResult) setSavedDirector(snap.directorResult);
   } else if (snap.state !== "complete" && wasComplete) {
     setWasComplete(false);
   }
 
   const showResult =
-    (snap.state === "complete" && snap.report) ||
-    (viewingSaved && savedReport);
+    (snap.state === "complete" && (snap.report || snap.directorResult)) ||
+    (viewingSaved && savedReport) ||
+    (viewingDirector && savedDirector);
   const activeReport =
-    snap.state === "complete" && snap.report ? snap.report : savedReport;
+    snap.state === "complete" && snap.report
+      ? snap.report
+      : viewingSaved
+        ? savedReport
+        : null;
+  const activeDirector =
+    snap.state === "complete" && snap.directorResult
+      ? snap.directorResult
+      : viewingDirector
+        ? savedDirector
+        : null;
   const canViewResult =
-    !!savedReport && snap.state !== "complete" && !viewingSaved;
+    !!savedReport && snap.state !== "complete" && !showResult;
+  const canViewPortrait =
+    !!savedDirector && snap.state !== "complete" && !showResult;
 
   const closeResult = () => {
     setViewingSaved(false);
+    setViewingDirector(false);
     if (snap.state === "complete") exitProfile();
   };
   const beginAnalysis = () => {
     setSavedReport(null);
     setViewingSaved(false);
+    setViewingDirector(false);
     startDeepScan();
   };
+  const beginDirector = (target: DirectorTarget) => {
+    setDirectorPicker(false);
+    setSavedDirector(null);
+    setViewingSaved(false);
+    setViewingDirector(false);
+    startDirector(target);
+  };
+  // default director target: reuse preferredView from a prior scan
+  const defaultTarget: DirectorTarget =
+    savedReport?.preferredView === "LEFT 3/4"
+      ? "left"
+      : savedReport?.preferredView === "RIGHT 3/4"
+        ? "right"
+        : "frontal";
 
   const isError = snap.state === "error";
   const mirrored = facing === "user";
@@ -89,16 +122,30 @@ export default function AuraVisionApp() {
             LOCAL PROCESSING — NO UPLOAD
           </span>
           {canScan && (
-            <button
-              onClick={beginAnalysis}
-              className={`font-mono font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 ${
-                demo
-                  ? "rounded border border-neutral-600 px-4 py-2 text-[11px] text-neutral-100"
-                  : "text-[11px] text-neutral-200"
-              }`}
-            >
-              DEEP ANALYSIS
-            </button>
+            <>
+              <button
+                onClick={beginAnalysis}
+                className={`font-mono font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 ${
+                  demo
+                    ? "rounded border border-neutral-600 px-4 py-2 text-[11px] text-neutral-100"
+                    : "text-[11px] text-neutral-200"
+                }`}
+              >
+                DEEP ANALYSIS
+              </button>
+              <button
+                onClick={() =>
+                  directorPicker ? beginDirector(defaultTarget) : setDirectorPicker(true)
+                }
+                className={`font-mono font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 ${
+                  demo
+                    ? "rounded border border-neutral-600 px-4 py-2 text-[11px] text-neutral-100"
+                    : "text-[11px] text-neutral-200"
+                }`}
+              >
+                DIRECTOR
+              </button>
+            </>
           )}
           {canViewResult && (
             <button
@@ -106,6 +153,24 @@ export default function AuraVisionApp() {
               className="font-mono text-[10px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200"
             >
               RESULT
+            </button>
+          )}
+          {canViewPortrait && (
+            <button
+              onClick={() => setViewingDirector(true)}
+              className="font-mono text-[10px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200"
+            >
+              PORTRAIT
+            </button>
+          )}
+          {!demo && (
+            <button
+              onClick={() => setFun((v) => !v)}
+              className={`font-mono text-[10px] font-medium tracking-[0.2em] transition-colors ${
+                fun ? "text-cyan-300" : "text-neutral-600 hover:text-neutral-400"
+              }`}
+            >
+              FUN
             </button>
           )}
           {!demo && (
@@ -156,6 +221,45 @@ export default function AuraVisionApp() {
             </div>
           )}
 
+          {/* director target picker */}
+          {directorPicker && snap.state !== "director" && (
+            <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded bg-black/70 px-5 py-4 font-mono backdrop-blur-sm">
+              <div className="mb-3 text-center text-[9px] tracking-[0.25em] text-neutral-400">
+                TARGET VIEW
+              </div>
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["frontal", "FRONTAL"],
+                    ["left", "LEFT 3/4"],
+                    ["right", "RIGHT 3/4"],
+                  ] as const
+                ).map(([t, lbl]) => (
+                  <button
+                    key={t}
+                    onClick={() => beginDirector(t)}
+                    className={`min-h-11 rounded border px-4 py-2 text-[10px] tracking-[0.15em] transition-colors ${
+                      t === defaultTarget
+                        ? "border-cyan-300/60 text-cyan-200"
+                        : "border-neutral-700 text-neutral-300 hover:border-neutral-500"
+                    }`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setDirectorPicker(false)}
+                className="mt-3 block w-full text-center text-[9px] tracking-[0.2em] text-neutral-500 hover:text-neutral-300"
+              >
+                CANCEL
+              </button>
+            </div>
+          )}
+
+          {/* director HUD */}
+          <DirectorOverlay snap={snap} fun={fun} onSkip={directorSkip} />
+
           {/* optimal-frame freeze — the actual captured candidate */}
           {snap.state === "analysis" && snap.optimalFrame && (
             <div className="absolute inset-0 animate-[fadeIn_0.4s_ease-out]">
@@ -205,13 +309,22 @@ export default function AuraVisionApp() {
             </div>
           )}
 
-          {/* visual signature — live result or saved session result */}
-          {showResult && activeReport && (
+          {/* results — visual signature or director portrait */}
+          {showResult && activeReport && !activeDirector && (
             <VisualSignature
               report={activeReport}
               frame={frameRef}
               videoRef={videoRef}
               onClose={closeResult}
+            />
+          )}
+          {showResult && activeDirector && (
+            <DirectorResult
+              result={activeDirector}
+              frame={frameRef}
+              fun={fun}
+              onLive={closeResult}
+              onDeepAnalysis={beginAnalysis}
             />
           )}
 

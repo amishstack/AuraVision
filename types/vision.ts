@@ -14,7 +14,8 @@ export type TrackingState =
   | "occluded"      // face present but landmark quality degraded
   | "lost"          // face was tracked, recently disappeared
   | "analysis"      // guided Deep Analysis pass
-  | "complete"      // visual signature screen
+  | "director"      // V6 guided portrait composition
+  | "complete"      // visual signature / director result screen
   | "error";
 
 export type CameraError =
@@ -173,6 +174,53 @@ export interface ScanPhaseUI {
   labels: string[];           // per-phase names
 }
 
+// ---------------------------------------------------------------------------
+// V6 — Director Mode
+// ---------------------------------------------------------------------------
+
+export type DirectorTarget = "frontal" | "left" | "right";
+
+export interface DirectorCheck {
+  name: string;
+  done: boolean;
+}
+
+export interface DirectorUI {
+  phase: "init" | "guide" | "ready";
+  instruction: string;
+  checks: DirectorCheck[];
+  composition: "POOR" | "IMPROVING" | "GOOD" | "EXCELLENT";
+  /** ready-hold progress 0..1 during final lock */
+  holdProgress: number;
+  /** seconds elapsed without a satisfying composition (for SKIP) */
+  waitSecs: number;
+}
+
+export interface PortraitReadiness {
+  framing: string;
+  lighting: string;
+  visibility: string;
+  angle: string;
+  stability: string;
+  occlusion: string;
+  overall: string; // PORTRAIT READY / GOOD / MODERATE
+}
+
+export interface DirectorResult {
+  /** the captured portrait (real candidate from BestFrameEngine) */
+  frame: BestFrameResult | null;
+  readiness: PortraitReadiness;
+  targetView: string;
+  achievedView: string;
+  lightingCoach: { before: string; after: string } | null;
+  aura: string[];
+  expression: {
+    motion: string;
+    eye: string;
+    lip: string;
+  } | null;
+}
+
 /** Mutable per-frame store — written by the tracking loop, read by the
  *  renderer every rAF and by React telemetry at ~10 Hz. */
 export interface TrackingFrame {
@@ -213,6 +261,10 @@ export interface TrackingFrame {
   newBestAt: number;
   /** Frozen selected frame once the FRAME phase completes. */
   optimalFrame: BestFrameResult | null;
+  /** V6 Director Mode live UI state. */
+  director: DirectorUI | null;
+  /** V6 Director Mode completed result. */
+  directorResult: DirectorResult | null;
   /** Latest analysis report (valid in "complete" state). */
   report: AnalysisReport | null;
 }

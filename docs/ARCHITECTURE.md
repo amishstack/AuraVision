@@ -182,6 +182,23 @@ labeled experimental — it is not an objective appearance judgment.
 - `components/results/OptimalFrame.tsx` — captured frame + geometry
   overlay toggle + qualitative breakdown
 
+## Director Mode (V6)
+
+`lib/director/director.ts` — `DirectorEngine`: ordered composition
+checks (distance → framing → angle → gaze → lighting → stability)
+evaluated each tick; the first unsatisfied check yields the single
+instruction, so already-satisfied conditions are skipped. Composition
+score = `scoreFrame` (shared with the best-frame engine). All checks
+satisfied → ~0.95s hold → PORTRAIT READY → capture via
+`BestFrameEngine.best()` → `DirectorResult` (readiness labels, achieved
+view, lighting before/after, expression stats, aura). `CONTINUE ANYWAY`
+appears after 12s unsatisfied; completion is never score-gated.
+
+Components: `components/director/DirectorOverlay.tsx` (HUD),
+`components/results/DirectorResult.tsx` (portrait card), and
+`lib/visualization/portraitArtifact.ts` (1080×1620 share card — the
+captured frame is included only in this explicit user-initiated share).
+
 ## Privacy
 
 All inference is on-device WASM. Frames never leave the browser; no
