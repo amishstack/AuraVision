@@ -64,6 +64,7 @@ export class FreeLabEngine {
   private poseVel = 0;
   private frozenVec: ExpressionVector | null = null;
   private faceSeenAt = 0;
+  private orientation = "FRONTAL";
 
   begin(now: number): void {
     this.phase = "baseline";
@@ -132,12 +133,26 @@ export class FreeLabEngine {
     this.faceSeenAt = now;
 
     // pose velocity — separates HEAD motion from facial deformation
+    // (motion state); orientation is an absolute angle readout kept
+    // independent so a stable side-facing head reports LEFT + STABLE.
     if (input.pose) {
       const dt = Math.max(0.016, (now - this.prevPoseT) / 1000);
       const vel = Math.abs(input.pose.yawDeg - this.prevYaw) / dt;
       this.poseVel = this.poseVel + 0.2 * (vel - this.poseVel);
       this.prevYaw = input.pose.yawDeg;
       this.prevPoseT = now;
+      const y = input.pose.yawDeg;
+      const p = input.pose.pitchDeg;
+      this.orientation =
+        Math.abs(p) > 16 && Math.abs(p) > Math.abs(y)
+          ? p > 0
+            ? "ELEVATED"
+            : "LOWERED"
+          : Math.abs(y) > 12
+            ? y > 0
+              ? "LEFT"
+              : "RIGHT"
+            : "FRONTAL";
     }
 
     if (this.phase === "baseline") {
@@ -244,6 +259,7 @@ export class FreeLabEngine {
           : 0,
       regions: this.phase === "frozen" ? this.frozenVec : this.smoothVec,
       poseMoving: this.poseVel > 10,
+      poseOrientation: this.orientation,
       baseline: this.baseline,
       recentEvents: this.recent,
       durationMs: now - this.startT,

@@ -349,6 +349,9 @@ export interface FreeLabUI {
   holdProgress: number; // baseline acquisition 0..1
   regions: ExpressionVector | null; // smoothed live activity
   poseMoving: boolean;
+  /** HEAD ORIENTATION — independent of motion state: FRONTAL / LEFT /
+   *  RIGHT / ELEVATED / LOWERED */
+  poseOrientation: string;
   baseline: Landmark[] | null;
   /** recent fired events (label + timestamp), newest last */
   recentEvents: { label: LabEventKind; at: number }[];

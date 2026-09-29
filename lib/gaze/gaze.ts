@@ -33,7 +33,10 @@ function eyeGaze(
   if (w < 1e-5 || h < 1e-6) return null;
 
   const cx = (a.x + b.x) / 2;
-  const cy = (t.y + bt.y) / 2;
+  // Calibration: the lower-lid landmark sits below the eye opening, so
+  // the lid midpoint is biased low and a centered iris reads as UP.
+  // Shift the reference up by ~12% of lid height to compensate.
+  const cy = (t.y + bt.y) / 2 - h * 0.12;
   return {
     dx: (i.x - cx) / (w / 2),   // -1..+1 at corners
     dy: (i.y - cy) / (h / 2),   // -1..+1 at lids

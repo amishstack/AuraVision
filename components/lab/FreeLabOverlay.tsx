@@ -21,6 +21,9 @@ const WHITE = "225, 232, 240";
 
 const STRIDE = 9;
 const MIN_DISP = 0.005;
+// Visualization-only dead-zone — stricter than the measurement floor.
+// Suppresses micro-jitter visually without touching recorded values.
+const DEAD_ZONE = 0.008;
 
 // region-balanced probe set — deformable features dense, silhouette
 // sparse. ~110 probes instead of a uniform 478-landmark sweep.
@@ -170,7 +173,7 @@ export default function FreeLabOverlay({
         const b = aligned?.[i] ?? cur[i];
         if (!a || !b) continue;
         const disp = Math.hypot(b.x - a.x, b.y - a.y);
-        if (disp < MIN_DISP) continue;
+        if (disp < DEAD_ZONE) continue;
         const strength = Math.min(1, disp / 0.06);
         // nonlinear compression — draw the capped vector
         const dirX = (b.x - a.x) / disp;
@@ -178,7 +181,7 @@ export default function FreeLabOverlay({
         const shown = vecLen(disp);
         const [ax, ay] = px(a);
         const [bx, by] = px({ x: a.x + dirX * shown, y: a.y + dirY * shown });
-        ctx.strokeStyle = `rgba(${lineCol}, ${(0.2 + strength * 0.5) * quiet})`;
+        ctx.strokeStyle = `rgba(${lineCol}, ${(0.28 + strength * 0.58) * quiet})`;
         ctx.beginPath();
         ctx.moveTo(ax, ay);
         ctx.lineTo(bx, by);
@@ -333,7 +336,8 @@ export default function FreeLabOverlay({
                 <div className="mb-1 flex justify-between">
                   <span className="text-neutral-500">FACIAL MOTION</span>
                   <span className="text-neutral-500">
-                    POSE {lab.poseMoving ? "MOVING" : "STABLE"}
+                    POSE {lab.poseOrientation} ·{" "}
+                    {lab.poseMoving ? "MOVING" : "STABLE"}
                   </span>
                 </div>
                 {REGION_ROWS.map(([name, key]) => (
@@ -356,8 +360,8 @@ export default function FreeLabOverlay({
             </div>
           )}
 
-          {/* controls — bottom-right */}
-          <div className="absolute bottom-12 right-3 flex flex-col gap-2 sm:bottom-14 sm:right-4">
+          {/* controls — right rail, clear of the bottom HUD on mobile */}
+          <div className="absolute right-2 top-1/2 flex -translate-y-1/2 flex-col gap-2 sm:right-4">
             {phase !== "frozen" && onFreeze && (
               <button
                 onClick={onFreeze}
@@ -402,7 +406,10 @@ export default function FreeLabOverlay({
               <div>PHASE {phase?.toUpperCase()}</div>
               <div>SAMPLES {lab.samples}</div>
               <div>MOTION {((regions?.overall ?? 0) * 100).toFixed(0)}%</div>
-              <div>POSE {lab.poseMoving ? "MOVING" : "STABLE"}</div>
+              <div>
+                POSE {lab.poseOrientation} ·{" "}
+                {lab.poseMoving ? "MOVING" : "STABLE"}
+              </div>
               <div className="mt-1 border-t border-white/10 pt-1">
                 RAW DISP — GREY
                 <br />
