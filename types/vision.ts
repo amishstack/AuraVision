@@ -16,6 +16,7 @@ export type TrackingState =
   | "analysis"      // guided Deep Analysis pass
   | "director"      // V6 guided portrait composition
   | "lab"           // V7 Expression Lab
+  | "freelab"       // V7.2 Free Expression Lab
   | "duo"           // V8 Aura Duo
   | "complete"      // visual signature / director result screen
   | "error";
@@ -312,6 +313,63 @@ export interface DuoResult {
   }[];
 }
 
+// ---------------------------------------------------------------------------
+// V7.2–V7.4 — Free Expression Lab / Motion Timeline / Motion Signature
+// ---------------------------------------------------------------------------
+
+export type LabEventKind =
+  | "GAZE SHIFT"
+  | "MOUTH RESPONSE"
+  | "BROW RESPONSE"
+  | "HEAD TURN"
+  | "MOTION PEAK"
+  | "FIELD STABLE";
+
+/** One recorded timeline sample (~12 Hz while Free Lab is active). */
+export interface TimelineSample {
+  t: number; // ms since Free Lab session start
+  regions: {
+    brow: number;
+    eyes: number;
+    nose: number;
+    mouth: number;
+    cheeks: number;
+    jaw: number;
+  };
+  pose: { yaw: number; pitch: number; roll: number };
+  gaze: { dx: number; dy: number };
+  motion: number; // overall facial-motion magnitude 0..1
+  events: LabEventKind[]; // events fired at this sample
+}
+
+/** Live UI state pushed by the FreeLabEngine each frame. */
+export interface FreeLabUI {
+  phase: "baseline" | "active" | "stable" | "frozen";
+  instruction: string;
+  holdProgress: number; // baseline acquisition 0..1
+  regions: ExpressionVector | null; // smoothed live activity
+  poseMoving: boolean;
+  baseline: Landmark[] | null;
+  /** recent fired events (label + timestamp), newest last */
+  recentEvents: { label: LabEventKind; at: number }[];
+  durationMs: number;
+  samples: number;
+}
+
+/** Derived deterministic artifact data built from a timeline. */
+export interface MotionSignatureData {
+  regionPeak: Record<keyof TimelineSample["regions"], number>;
+  regionMean: Record<keyof TimelineSample["regions"], number>;
+  peakRegion: string;
+  eventCount: number;
+  durationMs: number;
+  activeMs: number;
+  rhythm: string; // CONTINUOUS / INTERMITTENT / BURSTY
+  /** decimated overall-motion waveform (~160 points) for hero + card */
+  series: Float32Array;
+  baseline: Landmark[] | null;
+}
+
 /** Mutable per-frame store — written by the tracking loop, read by the
  *  renderer every rAF and by React telemetry at ~10 Hz. */
 export interface TrackingFrame {
@@ -366,6 +424,10 @@ export interface TrackingFrame {
   duoSubjects: (DuoSubject | null)[] | null;
   /** V8 Aura Duo completed result. */
   duoResult: DuoResult | null;
+  /** V7.2 Free Lab UI state while in freelab mode. */
+  freeLab: FreeLabUI | null;
+  /** V7.3 latest recorded motion timeline (frozen session snapshot). */
+  motionTimeline: TimelineSample[] | null;
   /** Latest analysis report (valid in "complete" state). */
   report: AnalysisReport | null;
 }

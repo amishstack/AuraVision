@@ -21,7 +21,7 @@ function uniqueIdx(sets: readonly { start: number; end: number }[][]): number[] 
   return [...s];
 }
 
-const REGION_IDX = {
+export const REGION_IDX = {
   brow: uniqueIdx([MESH.leftBrow, MESH.rightBrow]),
   eyes: uniqueIdx([MESH.leftEye, MESH.rightEye, MESH.leftIris, MESH.rightIris]),
   nose: [168, 6, 197, 195, 5, 4, 1, 19, 94, 2, 98, 97, 326, 327],

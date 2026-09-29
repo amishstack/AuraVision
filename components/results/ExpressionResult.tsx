@@ -73,11 +73,13 @@ export default function ExpressionResult({
   fun,
   onLive,
   onRestart,
+  onFreeLab,
 }: {
   result: ExpressionLabResult;
   fun: boolean;
   onLive: () => void;
   onRestart: () => void;
+  onFreeLab?: () => void;
 }) {
   const [blend, setBlend] = useState(1); // 0 = baseline, 1 = current
   const [barsOn, setBarsOn] = useState(false);
@@ -187,13 +189,21 @@ export default function ExpressionResult({
           </div>
         </div>
 
-        <div className="mt-6 flex gap-3">
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
           <button
             onClick={onRestart}
             className="rounded border border-white/20 px-4 py-2 text-[9px] tracking-[0.25em] text-neutral-300 transition hover:border-cyan-300/50 hover:text-cyan-200"
           >
             REPLAY LAB
           </button>
+          {onFreeLab && (
+            <button
+              onClick={onFreeLab}
+              className="rounded border border-cyan-300/40 bg-cyan-300/10 px-4 py-2 text-[9px] tracking-[0.25em] text-cyan-200 transition hover:bg-cyan-300/20"
+            >
+              FREE LAB
+            </button>
+          )}
           <button
             onClick={onLive}
             className="rounded bg-cyan-300/10 border border-cyan-300/40 px-4 py-2 text-[9px] tracking-[0.25em] text-cyan-200 transition hover:bg-cyan-300/20"
@@ -201,6 +211,13 @@ export default function ExpressionResult({
             RETURN TO LIVE
           </button>
         </div>
+        {onFreeLab && (
+          <div className="mt-3 text-center text-[8px] leading-relaxed tracking-[0.2em] text-neutral-600">
+            MOVE YOUR FACE
+            <br />
+            AURAVISION WILL MAP THE MOTION
+          </div>
+        )}
         {fun && (
           <div className="mt-3 text-[8px] tracking-[0.3em] text-cyan-300/60 animate-pulse">
             MOTION LOGGED

@@ -6,7 +6,11 @@ import type {
   DirectorResult as DirectorResultT,
   ExpressionLabResult,
   DuoResult as DuoResultT,
+  Landmark,
+  MotionSignatureData,
+  TimelineSample,
 } from "@/types/vision";
+import { buildMotionSignature } from "@/lib/lab/motionSignature";
 import { useFaceTracking } from "@/lib/tracking/useFaceTracking";
 import { useTelemetry } from "@/lib/tracking/useTelemetry";
 import CameraFeed from "@/components/camera/CameraFeed";
@@ -17,6 +21,9 @@ import VisualSignature from "@/components/scan/VisualSignature";
 import DirectorOverlay from "@/components/director/DirectorOverlay";
 import DirectorResult from "@/components/results/DirectorResult";
 import ExpressionLabOverlay from "@/components/lab/ExpressionLabOverlay";
+import FreeLabOverlay from "@/components/lab/FreeLabOverlay";
+import MotionTimeline from "@/components/lab/MotionTimeline";
+import MotionSignature from "@/components/lab/MotionSignature";
 import DuoOverlay from "@/components/duo/DuoOverlay";
 import ExpressionResult from "@/components/results/ExpressionResult";
 import DuoResult from "@/components/results/DuoResult";
@@ -35,6 +42,9 @@ export default function AuraVisionApp() {
     startDirector,
     directorSkip,
     startLab,
+    startFreeLab,
+    freezeFreeLab,
+    resumeFreeLab,
     startDuo,
     duoFinish,
     exitProfile,
@@ -64,9 +74,20 @@ export default function AuraVisionApp() {
   const [viewingDirector, setViewingDirector] = useState(false);
   const [viewingLab, setViewingLab] = useState(false);
   const [viewingDuo, setViewingDuo] = useState(false);
+  // V7.2–V7.4 — free lab view + session-persistent motion artifacts
+  const [labView, setLabView] = useState<"field" | "timeline" | "signature">(
+    "field",
+  );
+  const [savedTimeline, setSavedTimeline] = useState<TimelineSample[] | null>(
+    null,
+  );
+  const [savedBaseline, setSavedBaseline] = useState<Landmark[] | null>(null);
+  const [savedSignature, setSavedSignature] =
+    useState<MotionSignatureData | null>(null);
   const [fun, setFun] = useState(false);
   const [funFlash, setFunFlash] = useState(false);
   const [wasComplete, setWasComplete] = useState(false);
+  const [wasFrozen, setWasFrozen] = useState(false);
   if (snap.state === "complete" && !wasComplete) {
     setWasComplete(true);
     if (snap.report) setSavedReport(snap.report);
@@ -75,6 +96,15 @@ export default function AuraVisionApp() {
     if (snap.duoResult) setSavedDuo(snap.duoResult);
   } else if (snap.state !== "complete" && wasComplete) {
     setWasComplete(false);
+  }
+  // freeze transition → persist the timeline snapshot + baseline for
+  // timeline/signature views within this session
+  if (snap.freeLab?.phase === "frozen" && snap.motionTimeline && !wasFrozen) {
+    setWasFrozen(true);
+    setSavedTimeline(snap.motionTimeline);
+    setSavedBaseline(snap.freeLab.baseline);
+  } else if (snap.freeLab?.phase !== "frozen" && wasFrozen) {
+    setWasFrozen(false);
   }
 
   const showResult =
@@ -120,7 +150,8 @@ export default function AuraVisionApp() {
     setViewingDirector(false);
     setViewingLab(false);
     setViewingDuo(false);
-    if (snap.state === "complete") exitProfile();
+    setLabView("field");
+    if (snap.state === "complete" || snap.state === "freelab") exitProfile();
   };
   const beginAnalysis = () => {
     setSavedReport(null);
@@ -168,6 +199,38 @@ export default function AuraVisionApp() {
     if (snap.state === "complete") exitProfile();
     startDuo();
   };
+  const beginFreeLab = () => {
+    setViewingSaved(false);
+    setViewingDirector(false);
+    setViewingLab(false);
+    setViewingDuo(false);
+    setLabView("field");
+    if (snap.state === "complete") exitProfile();
+    startFreeLab();
+  };
+  // signature is derived deterministically from the recorded timeline
+  const activeSignature =
+    labView === "signature"
+      ? (savedSignature ??
+        buildMotionSignature(
+          savedTimeline ?? snap.motionTimeline ?? [],
+          savedBaseline,
+        ))
+      : null;
+  const openSignature = () => {
+    const sig = buildMotionSignature(
+      savedTimeline ?? snap.motionTimeline ?? [],
+      savedBaseline,
+    );
+    if (sig) {
+      setSavedSignature(sig);
+      setLabView("signature");
+    }
+  };
+  const canViewTimeline =
+    !!savedTimeline && snap.state !== "freelab" && labView === "field" && !showResult;
+  const canViewSignature =
+    !!savedSignature && snap.state !== "freelab" && labView === "field" && !showResult;
 
   const isError = snap.state === "error";
   const mirrored = facing === "user";
@@ -222,6 +285,16 @@ export default function AuraVisionApp() {
                 LAB
               </button>
               <button
+                onClick={beginFreeLab}
+                className={`font-mono text-[9px] font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 sm:text-[11px] ${
+                  demo
+                    ? "rounded border border-neutral-600 px-3 py-2 text-neutral-100"
+                    : "text-neutral-200"
+                }`}
+              >
+                FREE
+              </button>
+              <button
                 onClick={beginDuo}
                 className={`font-mono text-[9px] font-medium tracking-[0.2em] transition-colors hover:text-cyan-200 sm:text-[11px] ${
                   demo
@@ -263,6 +336,22 @@ export default function AuraVisionApp() {
               className="font-mono text-[9px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200 sm:text-[10px]"
             >
               DUO R
+            </button>
+          )}
+          {canViewTimeline && (
+            <button
+              onClick={() => setLabView("timeline")}
+              className="font-mono text-[9px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200 sm:text-[10px]"
+            >
+              TIMELINE
+            </button>
+          )}
+          {canViewSignature && (
+            <button
+              onClick={() => setLabView("signature")}
+              className="font-mono text-[9px] font-medium tracking-[0.2em] text-neutral-400 transition-colors hover:text-neutral-200 sm:text-[10px]"
+            >
+              MOTION
             </button>
           )}
           {!demo && (
@@ -368,6 +457,51 @@ export default function AuraVisionApp() {
             onExit={exitProfile}
           />
 
+          {/* free expression lab — live motion field (V7.2) */}
+          <FreeLabOverlay
+            frame={frameRef}
+            videoRef={videoRef}
+            snap={snap}
+            debug={debug}
+            fun={fun}
+            onFreeze={freezeFreeLab}
+            onResume={resumeFreeLab}
+            onTimeline={() => setLabView("timeline")}
+            onExit={exitProfile}
+          />
+
+          {/* expression timeline takeover (V7.3) */}
+          {labView === "timeline" &&
+            (snap.motionTimeline ?? savedTimeline) && (
+              <MotionTimeline
+                samples={snap.motionTimeline ?? savedTimeline ?? []}
+                fun={fun}
+                onBack={() => {
+                  setLabView("field");
+                  if (snap.state === "freelab") resumeFreeLab();
+                }}
+                onSignature={openSignature}
+                onLive={closeResult}
+              />
+            )}
+
+          {/* motion signature takeover (V7.4) */}
+          {labView === "signature" && activeSignature && (
+            <MotionSignature
+              signature={activeSignature}
+              fun={fun}
+              onReplay={() => {
+                /* reveal animation re-runs internally */
+              }}
+              onTimeline={() => setLabView("timeline")}
+              onLab={() => {
+                setLabView("field");
+                if (snap.state === "freelab") resumeFreeLab();
+              }}
+              onLive={closeResult}
+            />
+          )}
+
           {/* optimal-frame freeze — the actual captured candidate */}
           {snap.state === "analysis" && snap.optimalFrame && (
             <div className="absolute inset-0 animate-[fadeIn_0.4s_ease-out]">
@@ -448,6 +582,7 @@ export default function AuraVisionApp() {
                 fun={fun}
                 onLive={closeResult}
                 onRestart={replayLab}
+                onFreeLab={beginFreeLab}
               />
             )}
           {showResult &&

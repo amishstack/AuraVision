@@ -11,6 +11,7 @@ import { DeepAnalysisRunner } from "@/lib/analysis/runner";
 import { BestFrameEngine, toBestFrameResult } from "@/lib/bestFrame/bestFrame";
 import { DirectorEngine } from "@/lib/director/director";
 import { ExpressionLabEngine } from "@/lib/expression/lab";
+import { FreeLabEngine } from "@/lib/lab/freeLab";
 import { DuoTracker } from "@/lib/duo/duoTracking";
 import { DuoSynchrony } from "@/lib/duo/duoSynchrony";
 import { estimateGaze } from "@/lib/gaze/gaze";
@@ -63,6 +64,8 @@ export function createInitialFrame(): TrackingFrame {
     directorResult: null,
     lab: null,
     labResult: null,
+    freeLab: null,
+    motionTimeline: null,
     duo: null,
     duoSubjects: null,
     duoResult: null,
@@ -101,6 +104,12 @@ export interface TrackingControls {
   directorSkip: () => void;
   /** V7 — start Expression Lab (baseline → challenges → result). */
   startLab: () => void;
+  /** V7.2 — start Free Expression Lab. */
+  startFreeLab: () => void;
+  /** V7.2 — freeze the motion field at its current state. */
+  freezeFreeLab: () => void;
+  /** V7.2 — resume live motion after a freeze. */
+  resumeFreeLab: () => void;
   /** V8 — start Aura Duo (two-subject synchronized visualization). */
   startDuo: () => void;
   /** Gracefully finish Duo, keeping the current synchrony snapshot. */
@@ -122,6 +131,9 @@ export function useFaceTracking(
   const labRequested = useRef(false);
   const duoRequested = useRef(false);
   const duoFinish = useRef(false);
+  const freeLabRequested = useRef(false);
+  const freeLabFreeze = useRef(false);
+  const freeLabResume = useRef(false);
 
   useEffect(() => {
     Object.assign(frameRef.current, createInitialFrame());
@@ -136,6 +148,7 @@ export function useFaceTracking(
     const bestFrames = new BestFrameEngine();
     const director = new DirectorEngine();
     const lab = new ExpressionLabEngine();
+    const freeLab = new FreeLabEngine();
     const duoTracker = new DuoTracker();
     const duoSync = new DuoSynchrony();
     let secondFaceCx: number | null = null;
@@ -376,7 +389,51 @@ export function useFaceTracking(
           } else {
             frame.lab = null;
           }
-          // --- aura duo lifecycle (V8) ---------------------------------
+          // --- free expression lab lifecycle (V7.2) ---------------------
+          if (
+            freeLabRequested.current &&
+            (frame.state === "tracking" || frame.state === "locked")
+          ) {
+            freeLabRequested.current = false;
+            freeLab.begin(now);
+            frame.report = null;
+            frame.directorResult = null;
+            frame.labResult = null;
+            frame.duoResult = null;
+            frame.motionTimeline = null;
+            setState("freelab", now);
+          }
+          if (frame.state === "freelab") {
+            if (freeLabFreeze.current) {
+              freeLabFreeze.current = false;
+              freeLab.freeze();
+            }
+            if (freeLabResume.current) {
+              freeLabResume.current = false;
+              freeLab.resume(now);
+              frame.motionTimeline = null; // republish on next freeze
+            }
+            freeLab.update(
+              {
+                facePresent: frame.landmarks !== null,
+                landmarks: frame.landmarks,
+                dynamics: frame.dynamics,
+                gaze: frame.gaze,
+                pose: frame.pose,
+                stability: frame.metrics.stability,
+              },
+              now,
+            );
+            frame.freeLab = freeLab.ui(now);
+            // frozen → publish the timeline snapshot once
+            if (freeLab.frozen && !frame.motionTimeline) {
+              frame.motionTimeline = freeLab.snapshotTimeline();
+            }
+          } else {
+            frame.freeLab = null;
+            freeLabFreeze.current = false;
+            freeLabResume.current = false;
+          }
           if (
             duoRequested.current &&
             (frame.state === "tracking" ||
@@ -447,6 +504,7 @@ export function useFaceTracking(
             frame.labResult = null;
             frame.duoResult = null;
             frame.lab = null;
+            frame.freeLab = null;
             frame.duo = null;
             frame.duoSubjects = null;
             setState(
@@ -492,6 +550,7 @@ export function useFaceTracking(
             frame.state === "complete" ||
             frame.state === "error" ||
             frame.state === "lab" ||
+            frame.state === "freelab" ||
             frame.state === "duo"
           ) {
             // leave the profile / interactive-mode state untouched
@@ -681,6 +740,15 @@ export function useFaceTracking(
     },
     startLab: () => {
       labRequested.current = true;
+    },
+    startFreeLab: () => {
+      freeLabRequested.current = true;
+    },
+    freezeFreeLab: () => {
+      freeLabFreeze.current = true;
+    },
+    resumeFreeLab: () => {
+      freeLabResume.current = true;
     },
     startDuo: () => {
       duoRequested.current = true;

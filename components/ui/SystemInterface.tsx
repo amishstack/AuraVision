@@ -21,6 +21,7 @@ const STATE_LABEL: Record<TrackingState, string> = {
   analysis: "DEEP ANALYSIS",
   director: "DIRECTOR MODE",
   lab: "EXPRESSION LAB",
+  freelab: "FREE EXPRESSION LAB",
   duo: "AURA DUO",
   complete: "VISUAL SIGNATURE",
   error: "SYSTEM HALTED",
@@ -82,6 +83,7 @@ export default function SystemInterface({
     snap.state === "analysis" ||
     snap.state === "director" ||
     snap.state === "lab" ||
+    snap.state === "freelab" ||
     snap.state === "duo";
 
   const [funIdx, setFunIdx] = useState(0);
