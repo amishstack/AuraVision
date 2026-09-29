@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { coverFit, throughCover } from "@/lib/vision/imageTransform";
-import { REGION_IDX } from "@/lib/expression/vector";
+import { REGION_IDX, alignLandmarks } from "@/lib/expression/vector";
 import type { TrackingFrame } from "@/types/vision";
 
 /**
@@ -135,11 +135,12 @@ export default function FreeLabOverlay({
         }
       }
 
-      // --- displacement vectors --------------------------------------------
+      // --- displacement vectors (pose-normalized deformation) -------------
+      const aligned = alignLandmarks(baseline, cur);
       ctx.lineWidth = 1.1 * dpr;
       for (let i = 0; i < cur.length; i += STRIDE) {
         const a = baseline[i];
-        const b = cur[i];
+        const b = aligned?.[i] ?? cur[i];
         if (!a || !b) continue;
         const disp = Math.hypot(b.x - a.x, b.y - a.y);
         if (disp < MIN_DISP) continue;
