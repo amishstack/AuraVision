@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { coverFit, throughCover } from "@/lib/vision/imageTransform";
-import { REGION_IDX, alignLandmarks } from "@/lib/expression/vector";
+import {
+  REGION_IDX,
+  ALIGN_ANCHORS,
+  alignLandmarks,
+} from "@/lib/expression/vector";
 import type { TrackingFrame } from "@/types/vision";
 
 /**
@@ -17,6 +21,27 @@ const WHITE = "225, 232, 240";
 
 const STRIDE = 9;
 const MIN_DISP = 0.005;
+
+// region-balanced probe set — deformable features dense, silhouette
+// sparse. ~110 probes instead of a uniform 478-landmark sweep.
+const PROBES: number[] = (() => {
+  const out: number[] = [];
+  const add = (idx: readonly number[], stride: number) => {
+    for (let k = 0; k < idx.length; k += stride) out.push(idx[k]);
+  };
+  add(REGION_IDX.brow, 2);
+  add(REGION_IDX.eyes, 3);
+  add(REGION_IDX.nose, 1);
+  add(REGION_IDX.mouth, 2);
+  add(REGION_IDX.cheeks, 2);
+  add(REGION_IDX.jaw, 2);
+  add(REGION_IDX.silhouette, 4);
+  return [...new Set(out)];
+})();
+
+// saturating response — extremes compress, vectors stay short and local
+const VEC_CAP = 0.03; // max normalized display length (~3% of frame)
+const vecLen = (d: number) => VEC_CAP * (1 - Math.exp(-d / 0.015));
 
 const REGION_ROWS = [
   ["BROW", "brow"],
@@ -52,9 +77,11 @@ export default function FreeLabOverlay({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const funRef = useRef(fun);
+  const debugRef = useRef(debug);
   useEffect(() => {
     funRef.current = fun;
-  }, [fun]);
+    debugRef.current = debug;
+  }, [fun, debug]);
   const trail = useRef<Float32Array[]>([]);
 
   useEffect(() => {
@@ -138,28 +165,64 @@ export default function FreeLabOverlay({
       // --- displacement vectors (pose-normalized deformation) -------------
       const aligned = alignLandmarks(baseline, cur);
       ctx.lineWidth = 1.1 * dpr;
-      for (let i = 0; i < cur.length; i += STRIDE) {
+      for (const i of PROBES) {
         const a = baseline[i];
         const b = aligned?.[i] ?? cur[i];
         if (!a || !b) continue;
         const disp = Math.hypot(b.x - a.x, b.y - a.y);
         if (disp < MIN_DISP) continue;
         const strength = Math.min(1, disp / 0.06);
+        // nonlinear compression — draw the capped vector
+        const dirX = (b.x - a.x) / disp;
+        const dirY = (b.y - a.y) / disp;
+        const shown = vecLen(disp);
         const [ax, ay] = px(a);
-        const [bx, by] = px(b);
+        const [bx, by] = px({ x: a.x + dirX * shown, y: a.y + dirY * shown });
         ctx.strokeStyle = `rgba(${lineCol}, ${(0.2 + strength * 0.5) * quiet})`;
         ctx.beginPath();
         ctx.moveTo(ax, ay);
         ctx.lineTo(bx, by);
         ctx.stroke();
         const ang = Math.atan2(by - ay, bx - ax);
-        const tip = 3 * dpr;
+        const tip = 2.5 * dpr;
         ctx.beginPath();
         ctx.moveTo(bx, by);
         ctx.lineTo(bx - tip * Math.cos(ang - 0.5), by - tip * Math.sin(ang - 0.5));
         ctx.moveTo(bx, by);
         ctx.lineTo(bx - tip * Math.cos(ang + 0.5), by - tip * Math.sin(ang + 0.5));
         ctx.stroke();
+      }
+
+      // --- DEBUG: raw vs pose-normalized displacement + anchors ------------
+      if (debugRef.current) {
+        // raw (unaligned) displacement — thin grey probes
+        ctx.strokeStyle = `rgba(${WHITE}, 0.22)`;
+        ctx.lineWidth = 0.6 * dpr;
+        for (const i of PROBES) {
+          const a = baseline[i];
+          const b = cur[i];
+          if (!a || !b) continue;
+          const disp = Math.hypot(b.x - a.x, b.y - a.y);
+          if (disp < MIN_DISP) continue;
+          const shown = vecLen(disp);
+          const [ax, ay] = px(a);
+          const [bx, by] = px({
+            x: a.x + ((b.x - a.x) / disp) * shown,
+            y: a.y + ((b.y - a.y) / disp) * shown,
+          });
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+          ctx.stroke();
+        }
+        // alignment anchors on the baseline
+        ctx.fillStyle = `rgba(${ACCENT}, 0.8)`;
+        for (const [i] of ALIGN_ANCHORS) {
+          const p = baseline[i];
+          if (!p) continue;
+          const [ax, ay] = px(p);
+          ctx.fillRect(ax - 1.5 * dpr, ay - 1.5 * dpr, 3 * dpr, 3 * dpr);
+        }
       }
 
       // --- regional activity pulses ----------------------------------------
@@ -340,6 +403,13 @@ export default function FreeLabOverlay({
               <div>SAMPLES {lab.samples}</div>
               <div>MOTION {((regions?.overall ?? 0) * 100).toFixed(0)}%</div>
               <div>POSE {lab.poseMoving ? "MOVING" : "STABLE"}</div>
+              <div className="mt-1 border-t border-white/10 pt-1">
+                RAW DISP — GREY
+                <br />
+                ALIGNED — CYAN/WHITE
+                <br />
+                ANCHORS — ▪
+              </div>
             </div>
           )}
         </>

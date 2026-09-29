@@ -62,9 +62,23 @@ const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
  * Non-rigid foreshortening from real rotation still registers honestly.
  */
 
-// structurally stable anchors — eye corners, nose, mouth corners,
-// forehead, chin. Spread + symmetric for a well-conditioned fit.
-const ANCHORS = [10, 33, 133, 263, 362, 1, 4, 6, 61, 291, 152];
+// structurally stable anchors with reliability weights — eye corners
+// and the nasal bridge barely deform; mouth corners and chin DO move
+// during expressions, so they are down-weighted to keep the rigid fit
+// honest during the motions we actually measure.
+export const ALIGN_ANCHORS: readonly (readonly [number, number])[] = [
+  [10, 0.8],   // forehead top
+  [33, 1.0],   // L eye outer
+  [133, 1.0],  // L eye inner
+  [263, 1.0],  // R eye outer
+  [362, 1.0],  // R eye inner
+  [6, 1.0],    // nose bridge top
+  [1, 1.0],    // nose bridge
+  [4, 1.0],    // nose tip
+  [61, 0.4],   // mouth corner L (deforms)
+  [291, 0.4],  // mouth corner R (deforms)
+  [152, 0.5],  // chin (jaw motion)
+];
 
 interface SimTransform {
   cos: number;
@@ -76,40 +90,84 @@ interface SimTransform {
   by: number; // target centroid (baseline)
 }
 
-function fitSimilarity(base: Landmark[], cur: Landmark[]): SimTransform | null {
-  let ax = 0, ay = 0, bx = 0, by = 0, n = 0;
-  for (const i of ANCHORS) {
+function fitOnce(
+  base: Landmark[],
+  cur: Landmark[],
+  anchors: readonly (readonly [number, number])[],
+): SimTransform | null {
+  let ax = 0, ay = 0, bx = 0, by = 0, wsum = 0;
+  for (const [i, w] of anchors) {
     const a = base[i];
     const b = cur[i];
     if (!a || !b) continue;
-    bx += a.x;
-    by += a.y;
-    ax += b.x;
-    ay += b.y;
-    n++;
+    bx += a.x * w;
+    by += a.y * w;
+    ax += b.x * w;
+    ay += b.y * w;
+    wsum += w;
   }
-  if (n < 4) return null;
-  ax /= n;
-  ay /= n;
-  bx /= n;
-  by /= n;
+  if (wsum < 2) return null;
+  ax /= wsum;
+  ay /= wsum;
+  bx /= wsum;
+  by /= wsum;
   let num = 0, den = 0, sa = 0, sb = 0;
-  for (const i of ANCHORS) {
+  for (const [i, w] of anchors) {
     const a = base[i];
     const b = cur[i];
     if (!a || !b) continue;
     const axp = a.x - bx, ayp = a.y - by;
     const bxp = b.x - ax, byp = b.y - ay;
-    num += ayp * bxp - axp * byp;
-    den += axp * bxp + ayp * byp;
-    sa += Math.hypot(axp, ayp);
-    sb += Math.hypot(bxp, byp);
+    num += w * (ayp * bxp - axp * byp);
+    den += w * (axp * bxp + ayp * byp);
+    sa += w * Math.hypot(axp, ayp);
+    sb += w * Math.hypot(bxp, byp);
   }
   if (sb < 1e-6) return null;
   const theta = Math.atan2(num, den);
   // scale absorbs camera-distance drift, clamped to sane bounds
   const s = Math.max(0.85, Math.min(1.2, sa / sb));
   return { cos: Math.cos(theta), sin: Math.sin(theta), s, ax, ay, bx, by };
+}
+
+function mapPt(t: SimTransform, p: { x: number; y: number }) {
+  const dx = p.x - t.ax;
+  const dy = p.y - t.ay;
+  return {
+    x: t.bx + t.s * (t.cos * dx - t.sin * dy),
+    y: t.by + t.s * (t.sin * dx + t.cos * dy),
+  };
+}
+
+/**
+ * Weighted similarity fit with a single outlier-trim pass: anchors whose
+ * residual exceeds 2.5× the median are dropped and the fit is redone.
+ * This keeps a strong expression (which moves mouth/chin anchors) from
+ * bending the rigid frame while removing true pose change.
+ */
+function fitSimilarity(base: Landmark[], cur: Landmark[]): SimTransform | null {
+  let fit = fitOnce(base, cur, ALIGN_ANCHORS);
+  if (!fit) return null;
+
+  // residuals → trim worst anchors → refit once
+  const res = ALIGN_ANCHORS.map(([i, w]) => {
+    const a = base[i];
+    const b = cur[i];
+    if (!a || !b) return { i, w, r: 0 };
+    const m = mapPt(fit!, b);
+    return { i, w, r: Math.hypot(m.x - a.x, m.y - a.y) };
+  }).sort((p, q) => p.r - q.r);
+  const median = res[Math.floor(res.length / 2)]?.r ?? 0;
+  const keep = res.filter((e) => e.r <= Math.max(1e-4, median * 2.5));
+  if (keep.length >= 4 && keep.length < res.length) {
+    fit =
+      fitOnce(
+        base,
+        cur,
+        keep.map((e) => [e.i, e.w] as const),
+      ) ?? fit;
+  }
+  return fit;
 }
 
 function centroid(lm: Landmark[]): [number, number] {
@@ -143,15 +201,7 @@ export function alignLandmarks(
       z: p.z,
     }));
   }
-  return current.map((p) => {
-    const dx = p.x - fit.ax;
-    const dy = p.y - fit.ay;
-    return {
-      x: fit.bx + fit.s * (fit.cos * dx - fit.sin * dy),
-      y: fit.by + fit.s * (fit.sin * dx + fit.cos * dy),
-      z: p.z,
-    };
-  });
+  return current.map((p) => ({ ...mapPt(fit, p), z: p.z }));
 }
 
 /**
